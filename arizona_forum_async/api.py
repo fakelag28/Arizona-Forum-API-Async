@@ -45,8 +45,10 @@ class ArizonaAPI:
             try:
                 async with self._session.get(f"{MAIN_URL}/account/") as response:
                     response.raise_for_status()
-                    html_content = await response.text()
-                    if 'data-logged-in="false"' in html_content:
+                    html_content_main = await response.text()
+                    soup_main = BeautifulSoup(html_content_main, 'lxml')
+                    html_tag = soup_main.find('html')
+                    if not html_tag or html_tag.get('data-logged-in') == "false":
                         raise IncorrectLoginData("Неверные cookie или сессия истекла.")
 
                 async with self._session.get(f"{MAIN_URL}/help/terms/") as response:
@@ -157,7 +159,7 @@ class ArizonaAPI:
                 username = unescape(data['html']['title'])
 
                 username_class = soup.find('span', class_='username')
-                username_color = '#fff' # Default color
+                username_color = '#fff'
                 if username_class:
                     for style in ROLE_COLOR:
                         if style in str(username_class):
@@ -313,11 +315,10 @@ class ArizonaAPI:
                     creator = await self.get_member(creator_id)
                 except Exception as e:
                     print(f"Ошибка получения создателя ({creator_id}) для поста {post_id}: {e}")
-                if not creator: # Fallback
+                if not creator:
                     creator = Member(self, creator_id, creator_info_tag.text, None, None, None, None, None, None, None)
             else:
                 print(f"Не удалось найти информацию о создателе для поста {post_id}")
-                # Decide handling - returning None for now
                 return None
 
             thread = None
@@ -330,7 +331,6 @@ class ArizonaAPI:
                     print(f"Ошибка получения темы для поста {post_id}: {e}")
             if not thread:
                 print(f"Не удалось получить информацию о теме для поста {post_id}")
-                # Decide handling - returning None for now
                 return None
 
             create_date_tag = post_article.find('time', {'class': 'u-dt'})
@@ -445,8 +445,7 @@ class ArizonaAPI:
             except (AttributeError, ValueError): pass
 
             try:
-                # Find the container for the latest member
-                latest_member_dl = content_soup.find('dl', {'class': 'pairs pairs--justified'}) # This might be too generic, adjust if needed
+                latest_member_dl = content_soup.find('dl', {'class': 'pairs pairs--justified'})
                 if latest_member_dl:
                     latest_member_link = latest_member_dl.find('a', {'data-user-id': True})
                     if latest_member_link and latest_member_link.has_attr('data-user-id'):
@@ -564,7 +563,7 @@ class ArizonaAPI:
             return None
 
 
-    async def get_threads_extended(self, category_id: int, page: int = 1) -> Optional[List[Dict]]:
+    async def get_thread_category_detail(self, category_id: int, page: int = 1) -> Optional[List[Dict]]:
         if not self._session or self._session.closed:
             raise Exception("Сессия не активна. Вызовите connect() сначала.")
         token = await self.token
@@ -675,7 +674,6 @@ class ArizonaAPI:
                     return None
 
                 parent_category_id = int(parent_category_id_str)
-                # Вызываем асинхронную версию get_category
                 return await self.get_category(parent_category_id)
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при получении родительской категории для {category_id}: {e}")
@@ -998,7 +996,7 @@ class ArizonaAPI:
                     thread_post_id = post_article['id'].strip('js-post-')
                 else:
                     print(f"Не удалось найти ID первого поста для темы {thread_id}")
-                    return None # Не удалось найти пост для редактирования
+                    return None
 
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при получении информации для редактирования темы {thread_id}: {e}")
@@ -1013,7 +1011,7 @@ class ArizonaAPI:
         edit_url = f"{MAIN_URL}/posts/{thread_post_id}/edit"
         payload = {
             "message_html": message_html,
-            "message": message_html, # XenForo часто требует оба поля
+            "message": message_html,
             "_xfToken": token
         }
         try:
@@ -1036,20 +1034,12 @@ class ArizonaAPI:
 
         if prefix_id is not None:
             payload['prefix_id'] = prefix_id
-        # XenForo ожидает '1' для true в формах, отсутствие ключа для false
         if opened:
             payload["discussion_open"] = 1
         else:
-             # Для закрытия обычно нужно передать discussion_open=0, но API может отличаться.
-             # Если нужно явно закрыть, проверьте API или используйте 0.
-             # Если отсутствие ключа означает "не менять", то этот else не нужен.
-             # Если отсутствие ключа означает "закрыть", то так и оставить.
-             # По аналогии с sticky, предположим, что отсутствие ключа означает false/не менять.
-             pass # Или payload["discussion_open"] = 0, если API требует
+            pass
         if sticky:
             payload["sticky"] = 1
-        # else: # Аналогично opened, отсутствие ключа обычно означает false/не менять
-        #    pass
 
         try:
             async with self._session.post(url, data=payload) as response:
@@ -1059,7 +1049,7 @@ class ArizonaAPI:
             raise e
 
 
-    async def get_thread_category(self, thread_id: int) -> Optional['Category']: # Замените 'Category' на ваш класс
+    async def get_thread_category(self, thread_id: int) -> Optional['Category']:
         if not self._session or self._session.closed:
             raise Exception("Сессия не активна. Вызовите connect() сначала.")
 
@@ -1087,7 +1077,6 @@ class ArizonaAPI:
                     print(f"Не удалось преобразовать ID категории '{category_id_str}' в число для темы {thread_id}")
                     return None
 
-                # Используем асинхронный get_category из примера
                 return await self.get_category(category_id)
 
         except aiohttp.ClientError as e:
@@ -1097,55 +1086,6 @@ class ArizonaAPI:
             print(f"Ошибка парсинга при получении категории темы {thread_id}: {e}")
             return None
 
-    # Пример асинхронной get_category, как в вашем задании (нужен для get_thread_category)
-    async def get_category(self, category_id: int) -> Optional['Category']: # Замените 'Category' на ваш класс
-        if not self._session or self._session.closed:
-            raise Exception("Сессия не активна. Вызовите connect() сначала.")
-        token = await self.token
-        url = f"{MAIN_URL}/forums/{category_id}"
-        params = {'_xfResponseType': 'json', '_xfToken': token}
-        try:
-            async with self._session.get(url, params=params) as response:
-                response.raise_for_status()
-                data = await response.json()
-
-                if data.get('status') == 'error':
-                    error_message = data.get('errors', ['Неизвестная ошибка API'])[0]
-                    print(f"API вернуло ошибку для категории {category_id}: {error_message}")
-                    return None
-
-                if 'html' not in data or 'content' not in data['html'] or 'title' not in data['html']:
-                     print(f"Ответ API для категории {category_id} не содержит ожидаемых HTML данных.")
-                     return None
-
-                html_content = unescape(data['html']['content'])
-                soup = BeautifulSoup(html_content, 'lxml')
-                title = unescape(data['html']['title'])
-                pages_count = 1
-                try:
-                    page_nav = soup.find('ul', class_='pageNav-main')
-                    if page_nav:
-                         last_page_li = page_nav.find_all('li', class_='pageNav-page')[-1]
-                         pages_count = int(last_page_li.text)
-                except (IndexError, AttributeError, ValueError, TypeError):
-                    pages_count = 1 # Оставляем 1, если пагинации нет или ошибка парсинга
-
-                # Предполагается, что Category инициализируется так:
-                # return Category(self, category_id, title, pages_count)
-                # Замените на ваш реальный конструктор Category
-                return Category(self, category_id, title, pages_count) # Убедитесь, что Category определен
-
-        except aiohttp.ClientError as e:
-            print(f"Ошибка сети при получении категории {category_id}: {e}")
-            return None
-        except aiohttp.ContentTypeError as e:
-            print(f"Ошибка декодирования JSON при получении категории {category_id}: {e}")
-            return None
-        except Exception as e:
-            print(f"Неожиданная ошибка при получении категории {category_id}: {e}")
-            return None
-
-
     async def get_thread_posts(self, thread_id: int, page: int = 1) -> Optional[List[str]]:
         if not self._session or self._session.closed:
             raise Exception("Сессия не активна. Вызовите connect() сначала.")
@@ -1154,19 +1094,16 @@ class ArizonaAPI:
         params = {'_xfResponseType': 'json', '_xfToken': token}
         try:
             async with self._session.get(url, params=params) as response:
-                # Проверяем статус до попытки чтения JSON
-                if response.status == 404: # Страница не найдена
-                    return [] # Возвращаем пустой список для несуществующей страницы
-                response.raise_for_status() # Проверка на другие HTTP ошибки
+                if response.status == 404:
+                    return []
+                response.raise_for_status()
                 data = await response.json()
 
                 if data.get('status') == 'error':
-                    # Можно логировать data.get('errors')
-                    return None # Или пустой список [] в зависимости от желаемого поведения
+                    return None
 
                 if 'html' not in data or 'content' not in data['html']:
-                     # Нет HTML для парсинга
-                     return []
+                    return []
 
                 soup = BeautifulSoup(unescape(data['html']['content']), "lxml")
                 posts = soup.find_all('article', {'id': compile('js-post-*')})
@@ -1175,9 +1112,6 @@ class ArizonaAPI:
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при получении постов темы {thread_id}, стр {page}: {e}")
             return None
-        except aiohttp.ContentTypeError as e:
-             print(f"Ошибка декодирования JSON при получении постов темы {thread_id}, стр {page}: {e}")
-             return None
         except Exception as e:
             print(f"Неожиданная ошибка при получении постов темы {thread_id}, стр {page}: {e}")
             return None
@@ -1189,7 +1123,7 @@ class ArizonaAPI:
 
         all_posts_ids = []
         page = 1
-        pages_count = 1 # Инициализируем как 1
+        pages_count = 1
         processed_first_page = False
 
         while True:
@@ -1197,37 +1131,35 @@ class ArizonaAPI:
             params = {'_xfResponseType': 'json', '_xfToken': token}
             try:
                 async with self._session.get(url, params=params) as response:
-                    if response.status == 404 and page > 1: # Закончились страницы
+                    if response.status == 404 and page > 1:
                          break
                     response.raise_for_status()
                     data = await response.json()
 
                     if data.get('status') == 'error':
-                         # Если ошибка на первой странице - проблема, иначе - вероятно, достигли конца
-                         if page == 1:
-                             print(f"API вернуло ошибку на первой странице темы {thread_id}: {data.get('errors')}")
-                         break # Прекращаем цикл при ошибке API
+                        if page == 1:
+                            print(f"API вернуло ошибку на первой странице темы {thread_id}: {data.get('errors')}")
+                        break
 
                     if 'html' not in data or 'content' not in data['html']:
-                         print(f"Ответ API для темы {thread_id} стр {page} не содержит HTML.")
-                         if page == 1: # Проблема, если на первой стр нет контента
-                             return []
-                         else: # Вероятно, достигли пустой страницы после последней
-                             break
+                        print(f"Ответ API для темы {thread_id} стр {page} не содержит HTML.")
+                        if page == 1:
+                            return []
+                        else:
+                            break
 
                     html_content = unescape(data['html']['content'])
                     soup = BeautifulSoup(html_content, "lxml")
                     current_page_posts = soup.find_all('article', {'id': compile('js-post-*')})
                     post_ids = [i['id'].strip('js-post-') for i in current_page_posts if 'id' in i.attrs]
 
-                    if not post_ids and page > 1 : # Если не первая страница и постов нет, значит дошли до конца
+                    if not post_ids and page > 1:
                          break
 
                     all_posts_ids.extend(post_ids)
 
-                    # Определяем общее количество страниц только один раз (с первой страницы)
                     if not processed_first_page:
-                        pages_count = 1 # Сброс на случай, если пагинация не найдена
+                        pages_count = 1
                         try:
                             page_nav = soup.find('ul', class_='pageNav-main')
                             if page_nav:
@@ -1235,10 +1167,9 @@ class ArizonaAPI:
                                 if last_page_li:
                                      pages_count = int(last_page_li[-1].text)
                         except (IndexError, AttributeError, ValueError, TypeError):
-                             pages_count = 1 # Оставляем 1, если пагинации нет или ошибка
+                             pages_count = 1
                         processed_first_page = True
 
-                    # Проверяем, нужно ли идти на следующую страницу
                     if page >= pages_count:
                         break
 
@@ -1246,15 +1177,10 @@ class ArizonaAPI:
 
             except aiohttp.ClientError as e:
                 print(f"Ошибка сети при получении всех постов темы {thread_id}, стр {page}: {e}")
-                # Решаем, прерывать ли весь процесс или пропустить страницу
-                # В данном случае, лучше прервать, т.к. пропуск нарушит полноту данных
                 break
-            except aiohttp.ContentTypeError as e:
-                 print(f"Ошибка декодирования JSON при получении всех постов темы {thread_id}, стр {page}: {e}")
-                 break # Прерываем
             except Exception as e:
                 print(f"Неожиданная ошибка при получении всех постов темы {thread_id}, стр {page}: {e}")
-                break # Прерываем
+                break
 
         return all_posts_ids
 
@@ -1351,7 +1277,7 @@ class ArizonaAPI:
                         avatar_container = alert.find('div', class_='contentRow-figure')
                         if avatar_container:
                              avatar_img = avatar_container.find('img', {'class': 'avatar'})
-                             avatar_span = avatar_container.find('span', {'class': 'avatar'}) # Иногда это span
+                             avatar_span = avatar_container.find('span', {'class': 'avatar'})
 
                              if avatar_img and avatar_img.has_attr('src'):
                                  sender['avatar'] = avatar_img['src']
@@ -1378,7 +1304,7 @@ class ArizonaAPI:
                         'id': alert.get('data-alert-id'),
                         'is_unread': 'is-unread' in alert.get('class', []),
                         'text': alert_text,
-                        'link': f"{MAIN_URL}{link}" if link and link.startswith('/') else link, # Делаем ссылку абсолютной
+                        'link': f"{MAIN_URL}{link}" if link and link.startswith('/') else link,
                         'sender': sender,
                         'timestamp': timestamp
                     }
@@ -1388,10 +1314,10 @@ class ArizonaAPI:
             return notifications
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при получении уведомлений: {e}")
-            return [] # Возвращаем пустой список в случае ошибки сети
+            return []
         except Exception as e:
             print(f"Неожиданная ошибка при получении уведомлений: {e}")
-            return [] # Возвращаем пустой список в случае другой ошибки
+            return []
 
     async def search_threads(self, query: str, sort: str = 'relevance') -> list:
         """Поиск тем по форуму с заданными параметрами
@@ -1465,60 +1391,59 @@ class ArizonaAPI:
             raise e
 
     async def get_post_bbcode(self, thread_id: int, post_id: int) -> str:
-            """Получить BB-код поста по его ID.
+        """Получить BB-код поста по его ID.
 
-            Сначала получает HTML-содержимое поста через эндпоинт редактирования,
-            затем отправляет этот HTML для конвертации в BBCode.
+        Сначала получает HTML-содержимое поста,
+        затем отправляет этот HTML для конвертации в BBCode.
 
-            Args:
-                thread_id: ID темы, содержащей пост.
-                post_id: ID поста для получения BB-кода.
+        Args:
+            thread_id: ID темы, содержащей пост.
+            post_id: ID поста для получения BB-кода.
 
-            Returns:
-                Строка с BB-кодом поста или пустая строка в случае ошибки.
+        Returns:
+            Строка с BB-кодом поста или пустая строка в случае ошибки.
 
-            Raises:
-                Exception: Если сессия не активна.
-            """
-            if not self._session or self._session.closed:
-                raise Exception("Сессия не активна. Вызовите connect() сначала.")
-            try:
-                token = await self.token
-            except Exception as e:
-                print(f"Не удалось получить токен: {e}")
-                return ''
+        Raises:
+            Exception: Если сессия не активна.
+        """
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        try:
+            token = await self.token
+        except Exception as e:
+            print(f"Не удалось получить токен: {e}")
+            return ''
 
-            html_content = ''
-            try:
-                post = await self.get_post(post_id)
-                html_content = post.html_content
-            except aiohttp.ClientError as e:
-                print(f"Сетевая ошибка при получении HTML для поста {post_id}: {e}")
-            except Exception as e:
-                print(f"Неожиданная ошибка при получении HTML для поста {post_id}: {e}")
-            try:
-                convert_url = f"{MAIN_URL}/index.php?editor/to-bb-code"
-                data_post = {
-                    '_xfResponseType': 'json',
-                    '_xfRequestUri': f'/threads/{thread_id}/',
-                    '_xfWithData': 1,
-                    '_xfToken': token,
-                    'html': html_content
-                }
-                async with self._session.post(convert_url, data=data_post) as response:
-                    response.raise_for_status()
-                    convert_data = await response.json()
+        html_content = ''
+        try:
+            post = await self.get_post(post_id)
+            html_content = post.html_content
+        except aiohttp.ClientError as e:
+            print(f"Сетевая ошибка при получении HTML для поста {post_id}: {e}")
+        except Exception as e:
+            print(f"Неожиданная ошибка при получении HTML для поста {post_id}: {e}")
+        try:
+            convert_url = f"{MAIN_URL}/index.php?editor/to-bb-code"
+            data_post = {
+                '_xfResponseType': 'json',
+                '_xfRequestUri': f'/threads/{thread_id}/',
+                '_xfWithData': 1,
+                '_xfToken': token,
+                'html': html_content
+            }
+            async with self._session.post(convert_url, data=data_post) as response:
+                response.raise_for_status()
+                convert_data = await response.json()
+                if convert_data.get("status") == "ok" and "bbCode" in convert_data:
+                    bbcode = convert_data.get('bbCode', '')
+                    return unescape(bbcode)
+                else:
+                    print(f"Ошибка при конвертации BBCode для поста {post_id}. Ответ сервера: {convert_data}")
+                    return ''
 
-                    if convert_data.get("status") == "ok" and "bbCode" in convert_data:
-                        bbcode = convert_data.get('bbCode', '')
-                        return unescape(bbcode)
-                    else:
-                        print(f"Ошибка при конвертации BBCode для поста {post_id}. Ответ сервера: {convert_data}")
-                        return ''
-
-            except aiohttp.ClientError as e:
-                print(f"Сетевая ошибка при конвертации BBCode для поста {post_id}: {e}")
-                return ''
-            except Exception as e:
-                print(f"Неожиданная ошибка при конвертации BBCode для поста {post_id}: {e}")
-                return ''
+        except aiohttp.ClientError as e:
+            print(f"Сетевая ошибка при конвертации BBCode для поста {post_id}: {e}")
+            return ''
+        except Exception as e:
+            print(f"Неожиданная ошибка при конвертации BBCode для поста {post_id}: {e}")
+            return ''
