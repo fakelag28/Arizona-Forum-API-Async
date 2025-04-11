@@ -8,7 +8,7 @@ setup(
     version="1.0",
     author="fakelag28",
     author_email="fakelag712@gmail.com",
-    description="Асинхронная библиотека для работы с форумом Arizona RP",
+    description="Асинхронная Python библиотека для взаимодействия с форумом Arizona RP (forum.arizona-rp.com) без необходимости получения API ключа.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/fakelag28/Arizona-Forum-API-Async",
@@ -20,8 +20,10 @@ setup(
     ],
     python_requires=">=3.6",
     install_requires=[
-        "requests",
+        "aiohttp",
+        "aiohttp-socks",
         "beautifulsoup4",
+        "dukpy",
         "lxml",
     ],
 ) 
