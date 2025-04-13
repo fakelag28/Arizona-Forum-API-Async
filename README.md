@@ -51,7 +51,7 @@ pip install arizona-forum-api-async
 
 ## Документация и примеры
 
-*   **[Wiki (Расширенная документация синхронной версии)](https://github.com/fakelag28/Arizona-Forum-API-Async/wiki/%D0%9E%D1%81%D0%BD%D0%BE%D0%B2%D0%BD%D0%B0%D1%8F-%D0%B4%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D1%86%D0%B8%D1%8F):** Подробная документация для другой [расширенной синхронной версии](https://github.com/fakelag28/Arizona-Forum-API-Extended/).
+*   **[Wiki (Расширенная документация синхронной версии)](https://github.com/fakelag28/Arizona-Forum-API-Extended/wiki/Основная-документация):** Подробная документация для другой [расширенной синхронной версии](https://github.com/fakelag28/Arizona-Forum-API-Extended/).
 *   **[Документация оригинальной библиотеки](https://tastybread123.github.io/Arizona-API/arz_api.html):** Документация для оригинальной синхронной библиотеки.
 *   **[Папка с примерами](https://github.com/fakelag28/Arizona-Forum-API-Async/tree/main/examples):** Практические примеры, демонстрирующие различные возможности библиотеки.
 
