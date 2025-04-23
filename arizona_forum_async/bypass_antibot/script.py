@@ -810,7 +810,6 @@ _0xfab6 = [
 
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36 OPR/86.0.4363.64"
 
-
 def to_numbers(value):
     return dukpy.evaljs('''
         var _0x9ee6x3 = []; 
@@ -869,7 +868,6 @@ async def bypass_async(agent=user_agent, proxy=""):
     a, b, c = to_numbers(found[0]), to_numbers(found[1]), to_numbers(found[2])
     return _0xfab6[11] + to_hex([slow_aes([c, a, b]), _0xfab6]), session.headers.get("user-agent")
 
-
 def main():
     code = bypass()
     cookies = "name=value; name=value; name=value; "  # Из браузера копируем авторизованные куки без куки react lab arz
@@ -877,7 +875,6 @@ def main():
     r = requests.get("https://forum.arizona-rp.com/account/account-details", headers={"cookie": cookies, "user-agent": code[1]})
     username = re.compile("<span class=\"p-navgroup-linkText username--.*\">(.*)</span>").findall(r.text)
     print(username)
-
 
 if __name__ == '__main__':
     main()

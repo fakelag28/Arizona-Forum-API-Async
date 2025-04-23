@@ -2,7 +2,6 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/arizona-forum-api-async.svg)](https://pypi.org/project/arizona-forum-api-async/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/arizona-forum-api-async.svg)](https://pypi.org/project/arizona-forum-api-async/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Downloads](https://static.pepy.tech/badge/arizona-forum-api-async)](https://pepy.tech/project/arizona-forum-api-async)
 
 **Асинхронная Python библиотека для взаимодействия с форумом Arizona RP (forum.arizona-rp.com) без необходимости получения API ключа.**
@@ -54,9 +53,3 @@ pip install arizona-forum-api-async
 *   **[Wiki (Расширенная документация синхронной версии)](https://github.com/fakelag28/Arizona-Forum-API-Extended/wiki/Основная-документация):** Подробная документация для другой [расширенной синхронной версии](https://github.com/fakelag28/Arizona-Forum-API-Extended/).
 *   **[Документация оригинальной библиотеки](https://tastybread123.github.io/Arizona-API/arz_api.html):** Документация для оригинальной синхронной библиотеки.
 *   **[Папка с примерами](https://github.com/fakelag28/Arizona-Forum-API-Async/tree/main/examples):** Практические примеры, демонстрирующие различные возможности библиотеки.
-
----
-
-## Лицензия
-
-Этот проект лицензирован под **MIT License**.

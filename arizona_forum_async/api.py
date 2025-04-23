@@ -3,7 +3,9 @@ from bs4 import BeautifulSoup
 from re import compile, findall
 import re
 from html import unescape
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, Tuple
+from collections import defaultdict
+import datetime
 
 from arizona_forum_async.consts import MAIN_URL, ROLE_COLOR
 from arizona_forum_async.bypass_antibot import bypass_async
@@ -22,7 +24,6 @@ class ArizonaAPI:
         self.cookie_str = "; ".join([f"{k}={v}" for k, v in cookie.items()])
         self._session: aiohttp.ClientSession = None
         self._token: str = None
-
     
     async def connect(self, do_bypass: bool = True):
         """Асинхронный метод для создания сессии, получения токена и обхода анти-бота."""
@@ -138,7 +139,6 @@ class ArizonaAPI:
         except Exception as e:
             print(f"Неожиданная ошибка при получении категории {category_id}: {e}")
             return None
-
 
     async def get_member(self, user_id: int) -> 'Member | None':
         if not self._session or self._session.closed:
@@ -465,7 +465,7 @@ class ArizonaAPI:
             return None
     
 
-        # ---------------================ МЕТОДЫ ОБЪЕКТОВ ====================--------------------
+    # ---------------================ МЕТОДЫ ОБЪЕКТОВ ====================--------------------
 
     # CATEGORY
     async def create_thread(self, category_id: int, title: str, message_html: str, discussion_type: str = 'discussion', watch_thread: bool = True) -> aiohttp.ClientResponse:
@@ -562,7 +562,6 @@ class ArizonaAPI:
             print(f"Неожиданная ошибка при получении тем из категории {category_id} (страница {page}): {e}")
             return None
 
-
     async def get_thread_category_detail(self, category_id: int, page: int = 1) -> Optional[List[Dict]]:
         if not self._session or self._session.closed:
             raise Exception("Сессия не активна. Вызовите connect() сначала.")
@@ -648,7 +647,6 @@ class ArizonaAPI:
             print(f"Неожиданная ошибка при получении расширенных тем из категории {category_id} (страница {page}): {e}")
             return None
 
-
     async def get_parent_category_of_category(self, category_id: int) -> Optional[Category]:
         if not self._session or self._session.closed:
             raise Exception("Сессия не активна. Вызовите connect() сначала.")
@@ -682,7 +680,6 @@ class ArizonaAPI:
             print(f"Неожиданная ошибка при получении родительской категории для {category_id}: {e}")
             return None
 
-
     async def get_categories(self, category_id: int) -> Optional[List[int]]:
         if not self._session or self._session.closed:
             raise Exception("Сессия не активна. Вызовите connect() сначала.")
@@ -714,7 +711,6 @@ class ArizonaAPI:
             print(f"Неожиданная ошибка при получении дочерних категорий из {category_id}: {e}")
             return None
 
-
     # MEMBER
     async def follow_member(self, member_id: int) -> aiohttp.ClientResponse:
         if member_id == self.current_member.id:
@@ -730,7 +726,6 @@ class ArizonaAPI:
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при подписке/отписке от пользователя {member_id}: {e}")
             raise e
-
 
     async def ignore_member(self, member_id: int) -> aiohttp.ClientResponse:
         if member_id == self.current_member.id:
@@ -1020,7 +1015,6 @@ class ArizonaAPI:
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при редактировании темы {thread_id} (пост {thread_post_id}): {e}")
             raise e
-
 
     async def edit_thread_info(self, thread_id: int, title: str, prefix_id: Optional[int] = None, sticky: bool = True, opened: bool = True) -> aiohttp.ClientResponse:
         if not self._session or self._session.closed:
@@ -1368,6 +1362,54 @@ class ArizonaAPI:
             print(f"Неожиданная ошибка при поиске тем '{query}': {e}")
             return []
 
+    async def search_members(self, nickname: str) -> list:
+        """Поиск пользователей по нику
+        
+        Attributes:
+            nickname (str): Никнейм или его часть для поиска
+            
+        Returns:
+            Список словарей с информацией о найденных пользователях
+        """
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+            
+        try:
+            token = await self.token
+            url = f"{MAIN_URL}/index.php?members/find&q={nickname}&_xfRequestUri=%2Fsearch%2F&_xfWithData=1&_xfToken={token}&_xfResponseType=json"
+            
+            async with self._session.get(url) as response:
+                response.raise_for_status()
+                data = await response.json()
+                
+                results = []
+                if data.get('results'):
+                    for user in data['results']:
+                        try:
+                            user_id_match = re.search(r'data-user-id="(\d+)"', user.get('username_color', ''))
+                            user_id = int(user_id_match.group(1)) if user_id_match else None
+                            avatar_match = re.search(r'src="([^"]+)"', user.get('iconHtml', ''))
+                            avatar = avatar_match.group(1) if avatar_match else None
+                            
+                            user_data = {
+                                'user_id': user_id,
+                                'username': user.get('id'),
+                                'avatar': avatar,
+                                'profile_url': f"{MAIN_URL}{user['username_color'].split('href=\"')[1].split('\"')[0]}" if user.get('username_color') else None
+                            }
+                            results.append(user_data)
+                        except (ValueError, KeyError, AttributeError) as e:
+                            print(f"Ошибка обработки данных пользователя: {e}")
+                            continue
+                
+                return results     
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при поиске пользователей по нику '{nickname}': {e}")
+            return []
+        except Exception as e:
+            print(f"Неожиданная ошибка при поиске пользователей '{nickname}': {e}")
+            return []
+
     async def mark_notifications_read(self, alert_ids: list[int]) -> aiohttp.ClientResponse:
         """Пометить уведомления как прочитанные"""
         if not self._session or self._session.closed:
@@ -1447,3 +1489,358 @@ class ArizonaAPI:
         except Exception as e:
             print(f"Неожиданная ошибка при конвертации BBCode для поста {post_id}: {e}")
             return ''
+        
+    async def get_category_statistics_threads(self, category_id: int, duration: str = 'week') -> Optional[Dict]:
+        """
+        Собирает статистику по темам в указанной категории за определенный период.
+        Останавливает просмотр страниц, как только на странице не будет найдено тем, созданных после начала периода.
+
+        Args:
+            category_id (int): ID категории форума.
+            duration (str): Период для статистики ('day', 'week', 'month'). По умолчанию 'week'.
+
+        Returns:
+            Optional[Dict]: Словарь со статистикой или None в случае ошибки.
+                Структура словаря:
+                {
+                    'category_title': str,
+                    'category_id': int,
+                    'period': str,
+                    'start_timestamp': int,
+                    'end_timestamp': int,
+                    'total_threads_in_category': int, # Общее кол-во тем, обработанных до остановки
+                    'on_review': int, # Открытые и не закрепленные
+                    'pinned': int,
+                    'unpinned': int, # Все не закрепленные (включая 'on_review')
+                    'closed_in_period': int, # Закрытые именно в этот период
+                    'currently_open': int, # Текущее кол-во открытых тем (среди обработанных)
+                    'currently_closed': int, # Текущее кол-во закрытых тем (среди обработанных)
+                    'average_closing_time': str, # Среднее время закрытия в ЧЧ:ММ:СС
+                    'average_closing_time_seconds': float,
+                    'closer_stats': List[Dict], # Список закрывших с кол-вом и процентом
+                    'total_pages_in_category': int, # Общее кол-во страниц в категории
+                    'processed_pages': int # Кол-во фактически обработанных страниц
+                }
+        """
+        if not self._session or self._session.closed:
+            print("Ошибка: Сессия не активна. Вызовите connect() сначала.")
+            return None
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if duration == 'day':
+            delta = datetime.timedelta(days=1)
+            period_str = "день"
+        elif duration == 'week':
+            delta = datetime.timedelta(weeks=1)
+            period_str = "неделю"
+        elif duration == 'month':
+            delta = datetime.timedelta(days=30)
+            period_str = "месяц"
+        elif duration == 'year':
+            delta = datetime.timedelta(days=365)
+            period_str = "год"
+        else:
+            print(f"Ошибка: Неверное значение duration '{duration}'. Используйте 'day', 'week' или 'month'.")
+            return None
+
+        start_timestamp = int((now - delta).timestamp())
+
+        category_info = await self.get_category(category_id)
+        if not category_info:
+            print(f"Не удалось получить информацию о категории {category_id}")
+            return None
+
+        total_pages_in_category = category_info.pages_count
+        category_title = category_info.title
+
+        pinned_count = 0
+        unpinned_count = 0
+        currently_closed_count = 0
+        currently_open_count = 0
+        on_review_count = 0
+
+        closed_in_period_count = 0
+        total_closing_duration_seconds = 0
+        closers_stats = defaultdict(int)
+
+        all_threads_processed = 0
+        processed_pages_count = 0
+
+        for page in range(1, total_pages_in_category + 1):
+            processed_pages_count = page
+            page_contains_recent_threads = False
+
+            try:
+                page_threads = await self.get_thread_category_detail(category_id, page)
+
+                if page_threads is None:
+                    print(f"Предупреждение: Не удалось получить или обработать темы со страницы {page} категории {category_id} (возможно, ошибка парсинга). Пропускаем страницу.")
+                    continue
+
+            except AttributeError as e:
+                 print(f"Ошибка атрибута при обработке страницы {page} категории {category_id}: {e}. Пропускаем страницу.")
+                 continue
+            except Exception as e:
+                print(f"Неожиданная ошибка при получении тем из категории {category_id} (страница {page}): {e}. Пропускаем страницу.")
+                continue
+
+            if not page_threads:
+                print(f"Страница {page} категории {category_id} пуста или не содержит тем.")
+                continue
+
+            all_threads_processed += len(page_threads)
+
+            for thread_data in page_threads:
+                if thread_data.get('is_pinned'):
+                    pinned_count += 1
+                else:
+                    unpinned_count += 1
+
+                if thread_data.get('is_closed'):
+                    currently_closed_count += 1
+                else:
+                    currently_open_count += 1
+                    if not thread_data.get('is_pinned'):
+                         on_review_count += 1
+
+                last_message_date = thread_data.get('last_message_date')
+                closer_username = thread_data.get('username_last_message')
+                created_date = thread_data.get('created_date')
+
+                if thread_data.get('is_closed') and last_message_date and closer_username and created_date:
+                    if last_message_date >= start_timestamp:
+                        closed_in_period_count += 1
+                        closing_time_seconds = last_message_date - created_date
+                        if closing_time_seconds >= 0:
+                            total_closing_duration_seconds += closing_time_seconds
+                            closers_stats[closer_username] += 1
+
+                if created_date and created_date >= start_timestamp:
+                    page_contains_recent_threads = True
+
+            if not page_contains_recent_threads:
+                print(f"Остановка на странице {page}: не найдено тем, созданных после {datetime.datetime.fromtimestamp(start_timestamp, tz=datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}.")
+                break
+
+        average_closing_time_str = "N/A"
+        avg_seconds_float = 0.0
+        if closed_in_period_count > 0:
+            avg_seconds = total_closing_duration_seconds / closed_in_period_count
+            avg_seconds_float = avg_seconds
+            avg_td = datetime.timedelta(seconds=int(avg_seconds))
+
+            total_seconds_int = avg_td.days * 86400 + avg_td.seconds
+            hours, remainder = divmod(total_seconds_int, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            average_closing_time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+        sorted_closers = sorted(closers_stats.items(), key=lambda item: item[1], reverse=True)
+        formatted_closers = []
+        total_closed_by_tracked = sum(closers_stats.values())
+
+        for username, count in sorted_closers:
+            percentage = (count / total_closed_by_tracked * 100) if total_closed_by_tracked > 0 else 0
+            formatted_closers.append({
+                'username': username,
+                'count': count,
+                'percentage': round(percentage, 2)
+            })
+
+        result = {
+            'category_title': category_title,
+            'category_id': category_id,
+            'period': period_str,
+            'start_timestamp': start_timestamp,
+            'end_timestamp': int(now.timestamp()),
+            'total_threads_in_category': all_threads_processed,
+            'on_review': on_review_count,
+            'pinned': pinned_count,
+            'unpinned': unpinned_count,
+            'closed_in_period': closed_in_period_count,
+            'currently_open': currently_open_count,
+            'currently_closed': currently_closed_count,
+            'average_closing_time': average_closing_time_str,
+            'average_closing_time_seconds': avg_seconds_float,
+            'closer_stats': formatted_closers,
+            'total_pages_in_category': total_pages_in_category,
+            'processed_pages': processed_pages_count
+        }
+
+        return result
+    
+    async def get_category_statistics_posts(self, category_id: int, duration: str = 'week') -> Optional[Dict]:
+        """
+        Собирает статистику по постам в темах указанной категории за определенный период.
+
+        Args:
+            category_id (int): ID категории форума.
+            duration (str): Период для статистики ('day', 'week', 'month', 'year'). По умолчанию 'week'.
+
+        Returns:
+            Optional[Dict]: Словарь со статистикой по постам или None в случае ошибки.
+                Структура словаря:
+                {
+                    'category_title': str,
+                    'category_id': int,
+                    'period': str, # Описание периода ('за день', 'за неделю'...)
+                    'start_timestamp': int, # Начало периода (Unix time)
+                    'end_timestamp': int, # Конец периода (Unix time)
+                    'total_threads_checked': int, # Кол-во тем, чьи посты проверялись
+                    'total_posts_in_period': int, # Общее кол-во постов за период
+                    'posts_by_user': List[Dict], # Список пользователей с кол-вом постов и %
+                        # [{'username': str, 'count': int, 'percentage': float}]
+                    'total_category_pages': int, # Общее кол-во страниц в категории
+                    'processed_category_pages': int, # Кол-во обработанных страниц категории
+                }
+        """
+        if not self._session or self._session.closed:
+            print("Ошибка: Сессия не активна. Вызовите connect() сначала.")
+            return None
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if duration == 'day':
+            delta = datetime.timedelta(days=1)
+            period_str = "за день"
+        elif duration == 'week':
+            delta = datetime.timedelta(weeks=1)
+            period_str = "за неделю"
+        elif duration == 'month':
+            delta = datetime.timedelta(days=30)
+            period_str = "за месяц"
+        elif duration == 'year':
+            delta = datetime.timedelta(days=365)
+            period_str = "за год"
+        else:
+            print(f"Ошибка: Неверное значение duration '{duration}'. Используйте 'day', 'week', 'month' или 'year'.")
+            return None
+
+        start_timestamp = int((now - delta).timestamp())
+        end_timestamp = int(now.timestamp())
+
+        category_info = await self.get_category(category_id)
+        if not category_info:
+            print(f"Не удалось получить информацию о категории {category_id}")
+            return None
+
+        total_category_pages = category_info.pages_count
+        category_title = category_info.title
+
+        posts_by_user = defaultdict(int)
+        total_posts_in_period = 0
+        total_threads_checked = 0
+        processed_category_pages = 0
+
+        for cat_page_num in range(1, total_category_pages + 1):
+            processed_category_pages = cat_page_num
+
+            try:
+                threads_on_page = await self.get_thread_category_detail(category_id, cat_page_num)
+
+                if threads_on_page is None:
+                    print(f"Предупреждение: Не удалось получить темы со страницы {cat_page_num} категории {category_id}. Пропуск страницы.")
+                    continue
+                if not threads_on_page:
+                    continue
+
+            except Exception as e:
+                print(f"Неожиданная ошибка при получении тем из категории {category_id} (страница {cat_page_num}): {e}. Пропуск страницы.")
+                continue
+
+            for thread_data in threads_on_page:
+                thread_id = thread_data.get('thread_id')
+                last_message_date = thread_data.get('last_message_date')
+
+                if not thread_id:
+                    print(f"Предупреждение: Пропуск темы без ID на стр. {cat_page_num} категории {category_id}.")
+                    continue
+
+                if last_message_date and last_message_date < start_timestamp:
+                    continue
+
+                total_threads_checked += 1
+
+                try:
+                    thread_details = await self.get_thread(thread_id)
+                    if not thread_details:
+                        print(f"Предупреждение: Не удалось получить детали темы {thread_id}. Пропуск темы.")
+                        continue
+                    thread_pages_count = thread_details.pages_count
+                except Exception as e:
+                    print(f"Ошибка при получении деталей темы {thread_id}: {e}. Пропуск темы.")
+                    continue
+
+                stop_processing_this_thread = False
+
+                for thread_page_num in range(thread_pages_count, 0, -1):
+                    if stop_processing_this_thread:
+                        break
+
+                    page_url = f"{MAIN_URL}/threads/{thread_id}/page-{thread_page_num}"
+                    try:
+                        async with self._session.get(page_url) as response:
+                            if response.status == 404:
+                                print(f"Предупреждение: Страница {thread_page_num} темы {thread_id} не найдена (404).")
+                                continue
+                            response.raise_for_status()
+                            page_html = await response.text()
+                            page_soup = BeautifulSoup(page_html, 'lxml')
+
+                            posts_on_page = page_soup.find_all('article', class_=re.compile(r'\bmessage--post\b'))
+                            if not posts_on_page:
+                                continue
+
+                            page_had_relevant_posts = False
+
+                            for post_article in posts_on_page:
+                                post_author_name = "Неизвестный автор"
+                                post_author_tag = post_article.find('a', class_='username', attrs={'data-user-id': True})
+                                if post_author_tag:
+                                    post_author_name = post_author_tag.text.strip()
+
+                                post_timestamp = 0
+                                post_time_tag = post_article.find('time', class_='u-dt', attrs={'data-time': True})
+                                if post_time_tag and post_time_tag.get('data-time','').isdigit():
+                                    post_timestamp = int(post_time_tag['data-time'])
+                                else:
+                                    continue
+
+                                if post_timestamp >= start_timestamp:
+                                    total_posts_in_period += 1
+                                    posts_by_user[post_author_name] += 1
+                                    page_had_relevant_posts = True
+                                else:
+                                    stop_processing_this_thread = True
+                                    break
+
+                    except aiohttp.ClientError as e:
+                        print(f"Ошибка сети при получении страницы {thread_page_num} темы {thread_id}: {e}")
+                        continue
+                    except Exception as e:
+                        print(f"Неожиданная ошибка при обработке страницы {thread_page_num} темы {thread_id}: {e}")
+                        continue
+
+        sorted_users = sorted(posts_by_user.items(), key=lambda item: item[1], reverse=True)
+        formatted_users = []
+        for username, count in sorted_users:
+            percentage = (count / total_posts_in_period * 100) if total_posts_in_period > 0 else 0
+            formatted_users.append({
+                'username': username,
+                'count': count,
+                'percentage': round(percentage, 2)
+            })
+
+        result = {
+            'category_title': category_title,
+            'category_id': category_id,
+            'period': period_str,
+            'start_timestamp': start_timestamp,
+            'end_timestamp': end_timestamp,
+            'total_threads_checked': total_threads_checked,
+            'total_posts_in_period': total_posts_in_period,
+            'posts_by_user': formatted_users,
+            'total_category_pages': total_category_pages,
+            'processed_category_pages': processed_category_pages,
+        }
+
+        return result
