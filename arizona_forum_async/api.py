@@ -1391,11 +1391,18 @@ class ArizonaAPI:
                             avatar_match = re.search(r'src="([^"]+)"', user.get('iconHtml', ''))
                             avatar = avatar_match.group(1) if avatar_match else None
                             
+                            profile_url = None
+                            if user.get('username_color'):
+                                parts = user['username_color'].split('href="')
+                                if len(parts) > 1:
+                                    url_part = parts[1].split('"')[0]
+                                    profile_url = f"{MAIN_URL}{url_part}"
+                            
                             user_data = {
                                 'user_id': user_id,
                                 'username': user.get('id'),
                                 'avatar': avatar,
-                                'profile_url': f"{MAIN_URL}{user['username_color'].split('href=\"')[1].split('\"')[0]}" if user.get('username_color') else None
+                                'profile_url': profile_url
                             }
                             results.append(user_data)
                         except (ValueError, KeyError, AttributeError) as e:
