@@ -148,6 +148,8 @@ class ArizonaAPI:
         params = {'_xfResponseType': 'json', '_xfToken': token}
         try:
             async with self._session.get(url, params=params) as response:
+                if response.status == 403:
+                    return Member(self, user_id, None, None, None, [], 0, 0, 0, '#fff')
                 response.raise_for_status()
                 data = await response.json()
 
@@ -170,7 +172,7 @@ class ArizonaAPI:
                 roles_container = soup.find('div', {'class': 'memberHeader-banners'})
                 if roles_container:
                     for i in roles_container.children:
-                        if i.text != '\n': roles.append(i.text.strip()) # Added strip()
+                        if i.text != '\n': roles.append(i.text.strip())
 
                 try:
                     user_title_tag = soup.find('span', {'class': 'userTitle'})
@@ -207,6 +209,11 @@ class ArizonaAPI:
 
                 return Member(self, user_id, username, user_title, avatar, roles, messages_count, reactions_count, trophies_count, username_color)
 
+        except aiohttp.ClientResponseError as e:
+            if e.status == 403:
+                return Member(self, user_id, None, None, None, [], 0, 0, 0, '#fff')
+            print(f"Ошибка сети при получении пользователя {user_id}: {e}")
+            return None
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при получении пользователя {user_id}: {e}")
             return None
@@ -314,11 +321,10 @@ class ArizonaAPI:
                 try:
                     creator = await self.get_member(creator_id)
                 except Exception as e:
-                    print(f"Ошибка получения создателя ({creator_id}) для поста {post_id}: {e}")
+                    creator = Member(self, creator_id, None, None, None, None, None, None, None, None)
                 if not creator:
                     creator = Member(self, creator_id, creator_info_tag.text, None, None, None, None, None, None, None)
             else:
-                print(f"Не удалось найти информацию о создателе для поста {post_id}")
                 return None
 
             thread = None
@@ -368,12 +374,13 @@ class ArizonaAPI:
             creator_tag = post_article.find('a', {'class': 'username'})
             if creator_tag and creator_tag.has_attr('data-user-id'):
                 creator_id = int(creator_tag['data-user-id'])
-                creator = await self.get_member(creator_id)
+                try:
+                    creator = await self.get_member(creator_id)
+                except Exception as e:
+                    creator = Member(self, creator_id, None, None, None, [], 0, 0, 0, '#fff')
                 if not creator:
-                    print(f"Не удалось получить создателя ({creator_id}) для поста профиля {post_id}")
                     return None
             else:
-                print(f"Не удалось найти ID создателя для поста профиля {post_id}")
                 return None
 
             profile_owner = None
@@ -450,9 +457,12 @@ class ArizonaAPI:
                     latest_member_link = latest_member_dl.find('a', {'data-user-id': True})
                     if latest_member_link and latest_member_link.has_attr('data-user-id'):
                         last_user_id = int(latest_member_link['data-user-id'])
-                        last_register_member = await self.get_member(last_user_id)
+                        try:
+                            last_register_member = await self.get_member(last_user_id)
+                        except Exception as e:
+                            last_register_member = Member(self, last_user_id, None, None, None, [], 0, 0, 0, '#fff')
             except (AttributeError, ValueError, Exception) as e:
-                print(f"Ошибка получения последнего зарегистрированного пользователя: {e}")
+                pass
 
 
             return Statistic(self, threads_count, posts_count, users_count, last_register_member)
@@ -672,7 +682,10 @@ class ArizonaAPI:
                     return None
 
                 parent_category_id = int(parent_category_id_str)
-                return await self.get_category(parent_category_id)
+                try:
+                    return await self.get_category(parent_category_id)
+                except Exception as e:
+                    return None
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при получении родительской категории для {category_id}: {e}")
             return None
