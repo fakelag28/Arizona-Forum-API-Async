@@ -266,7 +266,13 @@ class ArizonaAPI:
 
 
                 create_date_tag = content_soup.find('time')
-                create_date = int(create_date_tag['data-time']) if create_date_tag and create_date_tag.has_attr('data-time') else 0
+                create_date = 0
+                if create_date_tag and create_date_tag.has_attr('data-time'):
+                    data_time_value = create_date_tag['data-time']
+                    if data_time_value.isdigit():
+                        create_date = int(data_time_value)
+                    else:
+                        create_date = 0
 
                 prefix_tag = content_h1_soup.find('span', {'class': 'label'})
                 if prefix_tag:
@@ -340,7 +346,13 @@ class ArizonaAPI:
                 return None
 
             create_date_tag = post_article.find('time', {'class': 'u-dt'})
-            create_date = int(create_date_tag['data-time']) if create_date_tag and create_date_tag.has_attr('data-time') else 0
+            create_date = 0
+            if create_date_tag and create_date_tag.has_attr('data-time'):
+                data_time_value = create_date_tag['data-time']
+                if data_time_value.isdigit():
+                    create_date = int(data_time_value)
+                else:
+                    create_date = 0
 
             html_content_tag = post_article.find('div', {'class': 'bbWrapper'})
             html_content = str(html_content_tag) if html_content_tag else ""
@@ -399,7 +411,14 @@ class ArizonaAPI:
                 return None
 
             create_date_tag = post_article.find('time')
-            create_date = int(create_date_tag['data-time']) if create_date_tag and create_date_tag.has_attr('data-time') else 0
+            create_date = 0
+            if create_date_tag and create_date_tag.has_attr('data-time'):
+                data_time_value = create_date_tag['data-time']
+                if data_time_value.isdigit():
+                    create_date = int(data_time_value)
+                else:
+                    create_date = 0
+
 
             html_content_tag = post_article.find('div', {'class': 'bbWrapper'})
             html_content = str(html_content_tag) if html_content_tag else ""
