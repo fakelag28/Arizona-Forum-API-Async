@@ -46,6 +46,12 @@ class Thread:
         """
 
         return await self.API.answer_thread(self.id, message_html)
+    
+    async def close(self) -> aiohttp.ClientResponse:
+        return await self.API.close_thread(self.id)
+    
+    async def pin(self) -> aiohttp.ClientResponse:
+        return await self.API.pin_thread(self.id)
 
 
     async def watch(self, email_subscribe: bool = False, stop: bool = False) -> aiohttp.ClientResponse:

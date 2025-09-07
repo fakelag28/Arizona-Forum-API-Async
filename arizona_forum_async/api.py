@@ -101,7 +101,7 @@ class ArizonaAPI:
                 raise Exception(f"Не удалось получить информацию для пользователя с ID {user_id}")
 
             return CurrentMember(self, user_id, member_info.username, member_info.user_title,
-                                member_info.avatar, member_info.roles, member_info.messages_count,
+                                member_info.avatar, member_info.roles, member_info.activity, member_info.messages_count,
                                 member_info.reactions_count, member_info.trophies_count, member_info.username_color)
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при получении данных текущего пользователя: {e}")
@@ -149,7 +149,7 @@ class ArizonaAPI:
         try:
             async with self._session.get(url, params=params) as response:
                 if response.status == 403:
-                    return Member(self, user_id, None, None, None, [], 0, 0, 0, '#fff')
+                    return Member(self, user_id, None, None, None, None, [], 0, 0, 0, '#fff')
                 response.raise_for_status()
                 data = await response.json()
 
@@ -159,6 +159,8 @@ class ArizonaAPI:
                 html_content = unescape(data['html']['content'])
                 soup = BeautifulSoup(html_content, 'lxml')
                 username = unescape(data['html']['title'])
+
+                activity = soup.find('dd', {'dir': 'auto'}).get_text(strip=False).strip('\n')
 
                 username_class = soup.find('span', class_='username')
                 username_color = '#fff'
@@ -207,11 +209,11 @@ class ArizonaAPI:
                     if trophy_tag: trophies_count = int(trophy_tag.text.strip().replace(',', ''))
                 except (AttributeError, ValueError): pass
 
-                return Member(self, user_id, username, user_title, avatar, roles, messages_count, reactions_count, trophies_count, username_color)
+                return Member(self, user_id, username, user_title, avatar, roles, activity, messages_count, reactions_count, trophies_count, username_color)
 
         except aiohttp.ClientResponseError as e:
             if e.status == 403:
-                return Member(self, user_id, None, None, None, [], 0, 0, 0, '#fff')
+                return Member(self, user_id, None, None, None, None, [], 0, 0, 0, '#fff')
             print(f"Ошибка сети при получении пользователя {user_id}: {e}")
             return None
         except aiohttp.ClientError as e:
@@ -259,7 +261,7 @@ class ArizonaAPI:
                     except Exception as e:
                         print(f"Ошибка получения создателя ({creator_id}) для темы {thread_id}: {e}")
                     if not creator:
-                        creator = Member(self, creator_id, creator_tag.text, None, None, None, None, None, None, None)
+                        creator = Member(self, creator_id, creator_tag.text, None, None, None, None, None, None, None, None)
                 else:
                     print(f"Не удалось найти информацию о создателе для темы {thread_id}")
                     return None
@@ -277,7 +279,7 @@ class ArizonaAPI:
                 prefix_tag = content_h1_soup.find('span', {'class': 'label'})
                 if prefix_tag:
                     prefix = prefix_tag.text
-                    title = content_h1_soup.text.strip(prefix).strip()
+                    title = content_h1_soup.text.strip().replace(prefix, "").strip()
                 else:
                     prefix = ""
                     title = content_h1_soup.text.strip()
@@ -327,9 +329,9 @@ class ArizonaAPI:
                 try:
                     creator = await self.get_member(creator_id)
                 except Exception as e:
-                    creator = Member(self, creator_id, None, None, None, None, None, None, None, None)
+                    creator = Member(self, creator_id, None, None, None, None, None, None, None, None, None)
                 if not creator:
-                    creator = Member(self, creator_id, creator_info_tag.text, None, None, None, None, None, None, None)
+                    creator = Member(self, creator_id, creator_info_tag.text, None, None, None, None, None, None, None, None)
             else:
                 return None
 
@@ -389,7 +391,7 @@ class ArizonaAPI:
                 try:
                     creator = await self.get_member(creator_id)
                 except Exception as e:
-                    creator = Member(self, creator_id, None, None, None, [], 0, 0, 0, '#fff')
+                    creator = Member(self, creator_id, None, None, None, None, [], 0, 0, 0, '#fff')
                 if not creator:
                     return None
             else:
@@ -479,7 +481,7 @@ class ArizonaAPI:
                         try:
                             last_register_member = await self.get_member(last_user_id)
                         except Exception as e:
-                            last_register_member = Member(self, last_user_id, None, None, None, [], 0, 0, 0, '#fff')
+                            last_register_member = Member(self, last_user_id, None, None, None, None, [], 0, 0, 0, '#fff')
             except (AttributeError, ValueError, Exception) as e:
                 pass
 
@@ -774,7 +776,6 @@ class ArizonaAPI:
             print(f"Ошибка сети при игнорировании/отмене игнорирования пользователя {member_id}: {e}")
             raise e
 
-
     async def add_profile_message(self, member_id: int, message_html: str) -> aiohttp.ClientResponse:
         if not self._session or self._session.closed:
             raise Exception("Сессия не активна. Вызовите connect() сначала.")
@@ -970,6 +971,32 @@ class ArizonaAPI:
                 return response
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при ответе в теме {thread_id}: {e}")
+            raise e
+        
+    async def close_thread(self, thread_id: int) -> aiohttp.ClientResponse:
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        token = await self.token
+        url = f"{MAIN_URL}/threads/{thread_id}/quick-close"
+        payload = {'_xfToken': token}
+        try:
+            response = await self._session.post(url, data=payload)
+            return response
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при закрытии/открытии темы {thread_id}: {e}")
+            raise e
+
+    async def pin_thread(self, thread_id: int) -> aiohttp.ClientResponse:
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        token = await self.token
+        url = f"{MAIN_URL}/threads/{thread_id}/quick-stick"
+        payload = {'_xfToken': token}
+        try:
+            response = await self._session.post(url, data=payload)
+            return response
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при закреплении/откреплении темы {thread_id}: {e}")
             raise e
 
     async def watch_thread(self, thread_id: int, email_subscribe: bool = False, stop: bool = False) -> aiohttp.ClientResponse:

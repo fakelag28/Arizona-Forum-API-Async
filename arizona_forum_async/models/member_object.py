@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 class Member:
-    def __init__(self, API : 'ArizonaAPI', id: int, username: str, user_title: str, avatar: str, roles: list, messages_count: int, reactions_count: int, trophies_count: int, username_color: str) -> None:
+    def __init__(self, API : 'ArizonaAPI', id: int, username: str, user_title: str, avatar: str, roles: list, activity: str, messages_count: int, reactions_count: int, trophies_count: int, username_color: str) -> None:
         self.API = API
         self.id = id
         """**ID пользователя**"""
@@ -22,7 +22,8 @@ class Member:
         """**Ссылка на аватарку пользователя**"""
         self.roles = roles
         """Роль пользователя на форуме ('покраска')"""
-
+        self.activity = activity
+        """**Активность пользователя на форуме**"""
         self.messages_count = messages_count
         """**Количество сообщений в счетчике**"""
         self.reactions_count = reactions_count
