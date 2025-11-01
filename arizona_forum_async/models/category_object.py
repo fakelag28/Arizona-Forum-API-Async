@@ -98,8 +98,19 @@ class Category:
             Словарь (dict), состоящий из списков закрепленных ('pins') и незакрепленных ('unpins') тем
         """
 
-        return await self.API.get_threads_extended(self.id, page)
+        return await self.API.get_thread_category_detail(self.id, page)
 
+    async def get_thread_category_detail(self, page: int = 1) -> dict:
+        """Получить темы из раздела с дополнительной информацией
+
+        Attributes:
+            page (int): Cтраница для поиска. По умолчанию 1 (необяз.)
+            
+        Returns:
+            Словарь (dict), состоящий из списков закрепленных ('pins') и незакрепленных ('unpins') тем
+        """
+
+        return await self.API.get_thread_category_detail(self.id, page)
 
     async def get_categories(self) -> list:
         """Получить дочерние категории из раздела

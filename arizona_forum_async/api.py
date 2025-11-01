@@ -1404,7 +1404,7 @@ class ArizonaAPI:
                         'status': thread.find('span', {'class': 'label'}).text if thread.find('span', {'class': 'label'}) else None,
                         'author': thread['data-author'],
                         'thread_id': int(title_link['href'].split('/')[-2]),
-                        'create_date': int(date_tag['data-time']) if date_tag else None,
+                        'create_date': int(date_tag['data-timestamp']) if date_tag else None,
                         'answers_count': int(answers_tag.split(': ')[1]) if answers_tag else 0,
                         'forum': thread.find('a', href=re.compile('/forums/')).text if thread.find('a', href=re.compile('/forums/')) else None,
                         'snippet': thread.find('div', {'class': 'contentRow-snippet'}).text.strip() if thread.find('div', {'class': 'contentRow-snippet'}) else None,
@@ -1445,21 +1445,22 @@ class ArizonaAPI:
                 if data.get('results'):
                     for user in data['results']:
                         try:
-                            user_id_match = re.search(r'data-user-id="(\d+)"', user.get('username_color', ''))
+                            user_id_match = re.search(r'data-user-id="(\d+)"', user.get('iconHtml', ''))
                             user_id = int(user_id_match.group(1)) if user_id_match else None
-                            avatar_match = re.search(r'src="([^"]+)"', user.get('iconHtml', ''))
+                            
+                            avatar_match = re.search(r'<img src="([^"]+)"', user.get('iconHtml', ''))
                             avatar = avatar_match.group(1) if avatar_match else None
                             
+                            username = user.get('id') or user.get('text')
+                            
                             profile_url = None
-                            if user.get('username_color'):
-                                parts = user['username_color'].split('href="')
-                                if len(parts) > 1:
-                                    url_part = parts[1].split('"')[0]
-                                    profile_url = f"{MAIN_URL}{url_part}"
+                            if user_id and username:
+                                username_slug = username.lower().replace(' ', '-')
+                                profile_url = f"{MAIN_URL}/members/{username_slug}.{user_id}/"
                             
                             user_data = {
                                 'user_id': user_id,
-                                'username': user.get('id'),
+                                'username': username,
                                 'avatar': avatar,
                                 'profile_url': profile_url
                             }
