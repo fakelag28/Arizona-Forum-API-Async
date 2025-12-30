@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 from re import compile, findall
 import re
 from html import unescape
-from typing import List, Dict, Optional, Union, Tuple
+from typing import List, Dict, Optional, Union, Tuple, Iterable
 from collections import defaultdict
 import datetime
 
@@ -160,7 +160,8 @@ class ArizonaAPI:
                 soup = BeautifulSoup(html_content, 'lxml')
                 username = unescape(data['html']['title'])
 
-                activity = soup.find('dd', {'dir': 'auto'}).get_text(strip=False).strip('\n')
+                activity_tag = soup.find('dd', {'dir': 'auto'})
+                activity = activity_tag.get_text(strip=False).strip('\n') if activity_tag else None
 
                 username_class = soup.find('span', class_='username')
                 username_color = '#fff'
@@ -1372,47 +1373,70 @@ class ArizonaAPI:
             print(f"Неожиданная ошибка при получении уведомлений: {e}")
             return []
 
-    async def search_threads(self, query: str, sort: str = 'relevance') -> list:
-        """Поиск тем по форуму с заданными параметрами
-        
-        Attributes:
-            query (str): Поисковый запрос
-            sort (str): Тип сортировки (relevance, date, etc)
-            
-        Returns:
-            Список словарей с информацией о найденных темах
-        """
+    async def search_threads(
+        self,
+        query: str,
+        sort: str = 'relevance',
+        author: str | None = None,
+        nodes: int | Iterable[int] | None = None,
+        include_children: bool = False,
+        search_type: str = 'post',  # 'post' или 'thread'
+    ) -> list:
+        """Поиск тем/постов по форуму с параметрами."""
         if not self._session or self._session.closed:
             raise Exception("Сессия не активна. Вызовите connect() сначала.")
-            
-        url = f"{MAIN_URL}/search/24587779/?q={query}&o={sort}"
+
+        base_url = f"{MAIN_URL}/search/24587779/"
+
+        params: list[tuple[str, str | int]] = [
+            ("q", query),
+            ("o", sort),
+            ("t", search_type),
+        ]
+        if author:
+            params.append(("c[users]", author))
+
+        if nodes is not None:
+            if isinstance(nodes, int):
+                params.append(("c[nodes][0]", nodes))
+            else:
+                for i, nid in enumerate(nodes):
+                    params.append((f"c[nodes][{i}]", int(nid)))
+
+        if include_children:
+            params.append(("c[child_nodes]", 1))
+
         results = []
-        
         try:
-            async with self._session.get(url) as response:
+            async with self._session.get(base_url, params=params) as response:
                 response.raise_for_status()
                 html_content = await response.text()
                 content = BeautifulSoup(html_content, 'lxml')
-                
+
                 for thread in content.find_all('li', {'class': 'block-row'}):
-                    title_link = thread.find('h3', {'class': 'contentRow-title'}).find('a')
+                    title_link = thread.select_one('h3.contentRow-title a')
+                    if not title_link:
+                        continue
+
+                    for sp in title_link.select('span.label, span.label-append'):
+                        sp.extract()
+                    title_clean = title_link.get_text(strip=True)
+
                     date_tag = thread.find('time', {'class': 'u-dt'})
-                    answers_tag = thread.find(text=re.compile('Ответы: '))
-                    
+                    answers_tag = thread.find(string=re.compile('Ответы: '))
+
                     thread_data = {
-                        'title': title_link.text.strip().split('| Причина:')[0].strip(),
-                        'status': thread.find('span', {'class': 'label'}).text if thread.find('span', {'class': 'label'}) else None,
-                        'author': thread['data-author'],
+                        'title': title_clean,
+                        'author': thread.get('data-author'),
                         'thread_id': int(title_link['href'].split('/')[-2]),
                         'create_date': int(date_tag['data-timestamp']) if date_tag else None,
                         'answers_count': int(answers_tag.split(': ')[1]) if answers_tag else 0,
                         'forum': thread.find('a', href=re.compile('/forums/')).text if thread.find('a', href=re.compile('/forums/')) else None,
                         'snippet': thread.find('div', {'class': 'contentRow-snippet'}).text.strip() if thread.find('div', {'class': 'contentRow-snippet'}) else None,
-                        'url': f"{MAIN_URL}{title_link['href']}"
+                        'url': f"{MAIN_URL}{title_link['href']}",
                     }
-                    
                     results.append(thread_data)
-                    
+
             return results
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при поиске тем по запросу '{query}': {e}")
