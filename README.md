@@ -62,6 +62,7 @@ python -m pip install .
 ## Аутентификация и настройка
 
 Поскольку эта библиотека имитирует действия залогиненного пользователя, вам потребуются Cookie из вашей браузерной сессии на `forum.arizona-rp.com`:
+<img src="https://github.com/fakelag28/Arizona-Forum-API-Async/blob/main/repo_images/cookie_guide.png?raw=true">
 
 **Как их получить:**
 
@@ -70,6 +71,7 @@ python -m pip install .
 3.  Установите расширение ["Cookie Editor"](https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm), после чего с его помощью получите следующие значения:
 * xf_tfa_trust
 * xf_user
+
 
 ---
 
