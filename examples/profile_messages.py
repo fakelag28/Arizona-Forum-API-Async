@@ -3,10 +3,9 @@ import arizona_forum_async as arz_api
 
 async def main():
     cookies = {"xf_user": "your",
-              "xf_tfa_trust": "your", 
-              "xf_session": "your"}
+              "xf_tfa_trust": "your"}
 
-    api = arz_api.ArizonaAPI(user_agent="your", cookie=cookies)
+    api = arz_api.ArizonaForumAPI(cookie=cookies)
 
     try:
         await api.connect()
@@ -23,10 +22,10 @@ async def main():
                 post = await api.get_profile_post(post_id)
                 if post:
                     print("\nMessage ID: {0}\nFrom: {1}\nText: {2}\nUnformatted text: {3}".format(
-                        post.creator.id, 
-                        post.creator.username, 
-                        post.text_content, 
-                        post.bb_content
+                        post.id,
+                        post.creator.username,
+                        post.html_content,
+                        post.text_content
                     ))
 
     except arz_api.IncorrectLoginData:

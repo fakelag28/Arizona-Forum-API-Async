@@ -1,5 +1,7 @@
 import asyncio
+import json
 import arizona_forum_async as arz_api
+
 
 async def main():
     cookies = {"xf_user": "your",
@@ -9,17 +11,17 @@ async def main():
 
     try:
         await forum_api.connect()
-        print("Успешно подключились!")
+        print("Successfully connected!")
 
-        post = await forum_api.get_post(42372695)
-        bbcode = await post.bbcode_content()
-        print(bbcode)
+        forums = await forum_api.get_category_forums(3794)
+        print(json.dumps(forums, indent=4, ensure_ascii=False))
     except arz_api.IncorrectLoginData:
-        print("Ошибка: Неверные куки или сессия истекла.")
+        print("Error: invalid cookies or expired session.")
     except Exception as e:
-        print(f"Произошла ошибка: {e}")
+        print(f"Unexpected error: {e}")
     finally:
         await forum_api.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

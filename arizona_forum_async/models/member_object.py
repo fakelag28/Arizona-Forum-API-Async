@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 class Member:
-    def __init__(self, API : 'ArizonaAPI', id: int, username: str, user_title: str, avatar: str, roles: list, activity: str, messages_count: int, reactions_count: int, trophies_count: int, username_color: str) -> None:
+    def __init__(self, API : 'ArizonaAPI', id: int, username: str, user_title: str, avatar: str, roles: list, activity: str, messages_count: int, reactions_count: int, trophies_count: int, username_color: str, banner: str) -> None:
         self.API = API
         self.id = id
         """**ID пользователя**"""
@@ -32,6 +32,9 @@ class Member:
         """**Количество баллов в счетчике**"""
 
         self.username_color = username_color
+
+        self.banner = banner
+        """**Ссылка на баннер пользователя**"""
 
         self.url = f"{MAIN_URL}/members/{self.id}/"
         """Ссылка на объект"""

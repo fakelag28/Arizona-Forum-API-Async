@@ -10,6 +10,12 @@ REACTIONS = {
     7: 'Мне не нравится'
 }
 
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/122.0.0.0 Safari/537.36"
+)
+
 ROLE_COLOR = {
     'style71': 'green',
     'style73': '#6DB36D',
@@ -20,5 +26,7 @@ ROLE_COLOR = {
     'style75': 'Skyblue',
     'style3': 'red',
     'style76': '#FF1493',
-    'style80': '#ff5733'
+    'style80': '#ff5733',
+    'style84': '#ffc0cb',
+    'style85': '#964B00'
 }

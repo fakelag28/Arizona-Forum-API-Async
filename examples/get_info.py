@@ -3,10 +3,9 @@ import arizona_forum_async as arz_api
 
 async def main():
     cookies = {"xf_user": "your",
-              "xf_tfa_trust": "your", 
-              "xf_session": "your"}
+              "xf_tfa_trust": "your"}
 
-    api = arz_api.ArizonaAPI(user_agent="your", cookie=cookies)
+    api = arz_api.ArizonaForumAPI(cookie=cookies)
 
     try:
         await api.connect()
@@ -46,7 +45,6 @@ async def main():
         profile_post = await api.get_profile_post(2247012)
         if profile_post:
             print(f"\n\nАвтор: {profile_post.creator.username} ({profile_post.creator.id})\nСоздано в {profile_post.create_date} у пользователя {profile_post.profile.username} ({profile_post.profile.id})\n\n{profile_post.html_content}")
-
     except arz_api.IncorrectLoginData:
         print("Ошибка: Неверные куки или сессия истекла.")
     except Exception as e:

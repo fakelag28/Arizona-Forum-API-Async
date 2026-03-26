@@ -1,11 +1,10 @@
 import arizona_forum_async as arz_api
 
 cookies = {"xf_user": "your",
-           "xf_tfa_trust": "your",
-           "xf_session": "your"}
+              "xf_tfa_trust": "your"}
 
 
-api = arz_api.ArizonaAPI(user_agent="your", cookie=cookies)
+api = arz_api.ArizonaForumAPI(user_agent="your", cookie=cookies)
 
 
 # ПРИМЕР ДЛЯ PAYSON
@@ -14,7 +13,7 @@ jb = api.send_form(45, {
                    'question[532]': "Your_Nick",  # Ваш ник
                    'question[533]': "Admin_Nick",  # Ник администратора
                    'question[534]': "ДМ ЗЗ",  # Причина наказания
-                   'question[535]': "ВИ ПЛАХИЕ ОПРУ ИЛИ СНИМАЙТИ ОДМЕНА",  # Суть жалобы
+                   'question[535]': "Суть жалобы",  # Суть жалобы
                    'question[536]': "https://imgur.com/a/Ak1MJWr",  #Скриншот истории наказаний
                    'question[537]': "https://imgur.com/a/Ak1MJWr",  # Скриншот при входе в игру (при бане)
                    'question[538]': "2023-07-10",  # Дата выдачи наказания

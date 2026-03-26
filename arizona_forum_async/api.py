@@ -7,8 +7,9 @@ from typing import List, Dict, Optional, Union, Tuple, Iterable
 from collections import defaultdict
 import datetime
 
-from arizona_forum_async.consts import MAIN_URL, ROLE_COLOR
+from arizona_forum_async.consts import MAIN_URL, ROLE_COLOR, DEFAULT_USER_AGENT
 from arizona_forum_async.bypass_antibot import bypass_async
+from arizona_forum_async._update_check import check_for_updates_async
 
 from arizona_forum_async.exceptions import IncorrectLoginData, ThisIsYouError
 from arizona_forum_async.models.other import Statistic
@@ -17,11 +18,15 @@ from arizona_forum_async.models.member_object import Member, CurrentMember
 from arizona_forum_async.models.thread_object import Thread
 from arizona_forum_async.models.category_object import Category
 
+__version__ = "1.5"
 
-class ArizonaAPI:
-    def __init__(self, user_agent: str, cookie: dict) -> None:
-        self.user_agent = user_agent
-        self.cookie_str = "; ".join([f"{k}={v}" for k, v in cookie.items()])
+class ArizonaForumAPI:
+    def __init__(self, user_agent: Optional[str] = None, cookie: dict = None) -> None:
+        self.user_agent = user_agent or DEFAULT_USER_AGENT
+        check_for_updates_async(__version__)
+
+        self.cookie_str = "; ".join([f"{k}={v}" for k, v in cookie.items()]) if cookie else ""
+
         self._session: aiohttp.ClientSession = None
         self._token: str = None
     
@@ -102,7 +107,7 @@ class ArizonaAPI:
 
             return CurrentMember(self, user_id, member_info.username, member_info.user_title,
                                 member_info.avatar, member_info.roles, member_info.activity, member_info.messages_count,
-                                member_info.reactions_count, member_info.trophies_count, member_info.username_color)
+                                member_info.reactions_count, member_info.trophies_count, member_info.username_color, member_info.banner)
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при получении данных текущего пользователя: {e}")
             return None
@@ -140,16 +145,54 @@ class ArizonaAPI:
             print(f"Неожиданная ошибка при получении категории {category_id}: {e}")
             return None
 
-    async def get_member(self, user_id: int) -> 'Member | None':
+    async def get_category_forums(self, category_id: int) -> Dict:
         if not self._session or self._session.closed:
             raise Exception("Сессия не активна. Вызовите connect() сначала.")
         token = await self.token
-        url = f"{MAIN_URL}/members/{user_id}"
+        url = f"{MAIN_URL}/categories/{category_id}"
         params = {'_xfResponseType': 'json', '_xfToken': token}
         try:
             async with self._session.get(url, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+                if data.get('status') == 'error':
+                    return None
+
+                html_content = unescape(data['html']['content'])
+                soup = BeautifulSoup(html_content, "lxml")
+
+                result = []
+                for forum in soup.find_all('div', class_=re.compile('node node--id.*')):
+                    link_tags = forum.find_all('h3', {"class": "node-title"})[0].find_all("a")
+                    if not link_tags: continue
+                    link = link_tags[-1]
+                    thread_ids = findall(r'\d+', link.get('href', ''))
+                    if not thread_ids: continue
+
+                    thread_id = int(thread_ids[0])
+                    result.append(thread_id)
+                return result                    
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при получении тем из категории {category_id}: {e}")
+            return None
+        except Exception as e:
+            print(f"Неожиданная ошибка при получении тем из категории {category_id}: {e}")
+            return None
+
+    async def get_member(self, user_id: int) -> 'Member | None':
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+
+        token = await self.token
+        url = f"{MAIN_URL}/members/{user_id}"
+        params = {'_xfResponseType': 'json', '_xfToken': token}
+
+        try:
+            async with self._session.get(url, params=params) as response:
                 if response.status == 403:
-                    return Member(self, user_id, None, None, None, None, [], 0, 0, 0, '#fff')
+                    return Member(self, user_id, None, None, None, [], None, 0, 0, 0, '#fff', None)
+
                 response.raise_for_status()
                 data = await response.json()
 
@@ -175,19 +218,35 @@ class ArizonaAPI:
                 roles_container = soup.find('div', {'class': 'memberHeader-banners'})
                 if roles_container:
                     for i in roles_container.children:
-                        if i.text != '\n': roles.append(i.text.strip())
+                        if getattr(i, 'text', None) and i.text != '\n':
+                            roles.append(i.text.strip())
 
                 try:
                     user_title_tag = soup.find('span', {'class': 'userTitle'})
-                    user_title = user_title_tag.text if user_title_tag else None
+                    user_title = user_title_tag.text.strip() if user_title_tag else None
                 except AttributeError:
                     user_title = None
 
                 try:
                     avatar_tag = soup.find('a', {'class': 'avatar avatar--l'})
                     avatar = MAIN_URL + avatar_tag['href'] if avatar_tag and avatar_tag.has_attr('href') else None
-                except TypeError:
+                except (TypeError, KeyError):
                     avatar = None
+
+                banner = None
+                try:
+                    banner_tag = soup.find('div', class_='memberProfileBanner')
+                    if banner_tag and banner_tag.has_attr('style'):
+                        style = banner_tag['style']
+                        match = re.search(r'background-image:\s*url\((["\']?)(.*?)\1\)', style)
+                        if match:
+                            banner_url = match.group(2).strip()
+                            if banner_url.startswith('/'):
+                                banner = MAIN_URL + banner_url
+                            elif banner_url.startswith('http://') or banner_url.startswith('https://'):
+                                banner = banner_url
+                except Exception:
+                    banner = None
 
                 messages_count = 0
                 reactions_count = 0
@@ -195,26 +254,51 @@ class ArizonaAPI:
 
                 try:
                     msg_tag = soup.find('a', {'href': f'/search/member?user_id={user_id}'})
-                    if msg_tag: messages_count = int(msg_tag.text.strip().replace(',', ''))
-                except (AttributeError, ValueError): pass
+                    if msg_tag:
+                        messages_count = int(msg_tag.text.strip().replace(',', '').replace(' ', ''))
+                except (AttributeError, ValueError):
+                    pass
 
                 try:
-                    react_tag = soup.find('dl', {'class': 'pairs pairs--rows pairs--rows--centered'})
-                    if react_tag:
-                        dd_tag = react_tag.find('dd')
-                        if dd_tag: reactions_count = int(dd_tag.text.strip().replace(',', ''))
-                except (AttributeError, ValueError): pass
+                    reactions_dl = None
+                    for dl in soup.find_all('dl', class_='pairs pairs--rows pairs--rows--centered'):
+                        dt = dl.find('dt')
+                        if dt and 'Реакции' in dt.get_text(strip=True):
+                            reactions_dl = dl
+                            break
+
+                    if reactions_dl:
+                        dd_tag = reactions_dl.find('dd')
+                        if dd_tag:
+                            reactions_count = int(dd_tag.text.strip().replace(',', '').replace(' ', ''))
+                except (AttributeError, ValueError):
+                    pass
 
                 try:
                     trophy_tag = soup.find('a', {'href': f'/members/{user_id}/trophies'})
-                    if trophy_tag: trophies_count = int(trophy_tag.text.strip().replace(',', ''))
-                except (AttributeError, ValueError): pass
+                    if trophy_tag:
+                        trophies_count = int(trophy_tag.text.strip().replace(',', '').replace(' ', ''))
+                except (AttributeError, ValueError):
+                    pass
 
-                return Member(self, user_id, username, user_title, avatar, roles, activity, messages_count, reactions_count, trophies_count, username_color)
+                return Member(
+                    self,
+                    user_id,
+                    username,
+                    user_title,
+                    avatar,
+                    roles,
+                    activity,
+                    messages_count,
+                    reactions_count,
+                    trophies_count,
+                    username_color,
+                    banner
+                )
 
         except aiohttp.ClientResponseError as e:
             if e.status == 403:
-                return Member(self, user_id, None, None, None, None, [], 0, 0, 0, '#fff')
+                return Member(self, user_id, None, None, None, [], None, 0, 0, 0, '#fff', None)
             print(f"Ошибка сети при получении пользователя {user_id}: {e}")
             return None
         except aiohttp.ClientError as e:
@@ -223,7 +307,6 @@ class ArizonaAPI:
         except Exception as e:
             print(f"Неожиданная ошибка при получении пользователя {user_id}: {e}")
             return None
-
 
     async def get_thread(self, thread_id: int) -> 'Thread | None':
         if not self._session or self._session.closed:
@@ -262,20 +345,20 @@ class ArizonaAPI:
                     except Exception as e:
                         print(f"Ошибка получения создателя ({creator_id}) для темы {thread_id}: {e}")
                     if not creator:
-                        creator = Member(self, creator_id, creator_tag.text, None, None, None, None, None, None, None, None)
+                        creator = Member(self, creator_id, creator_tag.text, None, None, None, None, None, None, None, None, None)
                 else:
                     print(f"Не удалось найти информацию о создателе для темы {thread_id}")
                     return None
 
 
-                create_date_tag = content_soup.find('time')
+                message_header = content_soup.find('header', class_='message-attribution')
+                create_date_tag = message_header.find('time', class_='u-dt') if message_header else None
+
                 create_date = 0
-                if create_date_tag and create_date_tag.has_attr('data-time'):
-                    data_time_value = create_date_tag['data-time']
-                    if data_time_value.isdigit():
-                        create_date = int(data_time_value)
-                    else:
-                        create_date = 0
+                if create_date_tag and create_date_tag.has_attr('data-timestamp'):
+                    data_timestamp_value = create_date_tag['data-timestamp']
+                    if data_timestamp_value.isdigit():
+                        create_date = int(data_timestamp_value)
 
                 prefix_tag = content_h1_soup.find('span', {'class': 'label'})
                 if prefix_tag:
@@ -330,9 +413,9 @@ class ArizonaAPI:
                 try:
                     creator = await self.get_member(creator_id)
                 except Exception as e:
-                    creator = Member(self, creator_id, None, None, None, None, None, None, None, None, None)
+                    creator = Member(self, creator_id, None, None, None, None, None, None, None, None, None, None)
                 if not creator:
-                    creator = Member(self, creator_id, creator_info_tag.text, None, None, None, None, None, None, None, None)
+                    creator = Member(self, creator_id, creator_info_tag.text, None, None, None, None, None, None, None, None, None)
             else:
                 return None
 
@@ -340,7 +423,7 @@ class ArizonaAPI:
             html_tag = content_soup.find('html')
             if html_tag and html_tag.has_attr('data-content-key') and html_tag['data-content-key'].startswith('thread-'):
                 try:
-                    thread_id = int(html_tag['data-content-key'].strip('thread-'))
+                    thread_id = int(html_tag['data-content-key'].replace('thread-', '', 1))
                     thread = await self.get_thread(thread_id)
                 except (ValueError, Exception) as e:
                     print(f"Ошибка получения темы для поста {post_id}: {e}")
@@ -348,14 +431,12 @@ class ArizonaAPI:
                 print(f"Не удалось получить информацию о теме для поста {post_id}")
                 return None
 
-            create_date_tag = post_article.find('time', {'class': 'u-dt'})
             create_date = 0
-            if create_date_tag and create_date_tag.has_attr('data-time'):
-                data_time_value = create_date_tag['data-time']
-                if data_time_value.isdigit():
-                    create_date = int(data_time_value)
-                else:
-                    create_date = 0
+            create_date_tag = post_article.select_one('header.message-attribution time.u-dt')
+            if create_date_tag:
+                data_timestamp_value = create_date_tag.get('data-timestamp')
+                if data_timestamp_value and str(data_timestamp_value).isdigit():
+                    create_date = int(data_timestamp_value)
 
             html_content_tag = post_article.find('div', {'class': 'bbWrapper'})
             html_content = str(html_content_tag) if html_content_tag else ""
@@ -392,7 +473,7 @@ class ArizonaAPI:
                 try:
                     creator = await self.get_member(creator_id)
                 except Exception as e:
-                    creator = Member(self, creator_id, None, None, None, None, [], 0, 0, 0, '#fff')
+                    creator = Member(self, creator_id, None, None, None, None, [], 0, 0, 0, '#fff', None)
                 if not creator:
                     return None
             else:
@@ -413,15 +494,18 @@ class ArizonaAPI:
                 print(f"Не удалось определить владельца профиля для поста {post_id}")
                 return None
 
-            create_date_tag = post_article.find('time')
-            create_date = 0
-            if create_date_tag and create_date_tag.has_attr('data-time'):
-                data_time_value = create_date_tag['data-time']
-                if data_time_value.isdigit():
-                    create_date = int(data_time_value)
-                else:
-                    create_date = 0
+            message_content = post_article.find('div', class_='message-content')
 
+            create_date = 0
+            create_date_tag = None
+
+            if message_content:
+                for time_tag in message_content.find_all('time'):
+                    data_timestamp_value = time_tag.get('data-timestamp')
+                    if data_timestamp_value and str(data_timestamp_value).isdigit():
+                        create_date_tag = time_tag
+                        create_date = int(data_timestamp_value)
+                        break
 
             html_content_tag = post_article.find('div', {'class': 'bbWrapper'})
             html_content = str(html_content_tag) if html_content_tag else ""
@@ -482,7 +566,7 @@ class ArizonaAPI:
                         try:
                             last_register_member = await self.get_member(last_user_id)
                         except Exception as e:
-                            last_register_member = Member(self, last_user_id, None, None, None, None, [], 0, 0, 0, '#fff')
+                            last_register_member = Member(self, last_user_id, None, None, None, None, [], 0, 0, 0, '#fff', None)
             except (AttributeError, ValueError, Exception) as e:
                 pass
 
@@ -613,15 +697,20 @@ class ArizonaAPI:
                 result = []
                 seen_thread_ids = set()
 
-                for thread in soup.find_all('div', class_=compile('structItem structItem--thread.*')):
-                    title_div = thread.find('div', "structItem-title")
-                    if not title_div: continue
+                for thread in soup.find_all('div', class_=compile(r'structItem structItem--thread.*')):
+                    title_div = thread.find('div', class_='structItem-title')
+                    if not title_div:
+                        continue
+
                     link_tags = title_div.find_all("a")
-                    if not link_tags: continue
+                    if not link_tags:
+                        continue
+
                     link = link_tags[-1]
 
                     thread_ids = findall(r'\d+', link.get('href', ''))
-                    if not thread_ids: continue
+                    if not thread_ids:
+                        continue
                     thread_id = int(thread_ids[0])
 
                     if thread_id in seen_thread_ids:
@@ -630,13 +719,16 @@ class ArizonaAPI:
 
                     thread_data = {}
 
-                    minor_div = thread.find('div', 'structItem-cell--main').find('div', 'structItem-minor')
-                    username_author_tag = minor_div.find('ul', 'structItem-parts').find('a', class_='username') if minor_div else None
-                    thread_data['username_author'] = username_author_tag.text.strip() if username_author_tag else None
-                    thread_data['thread_title'] = link.text.strip()
+                    main_cell = thread.find('div', class_='structItem-cell--main')
+                    minor_div = main_cell.find('div', class_='structItem-minor') if main_cell else None
+                    parts_ul = minor_div.find('ul', class_='structItem-parts') if minor_div else None
+
+                    username_author_tag = parts_ul.find('a', class_='username') if parts_ul else None
+                    thread_data['username_author'] = username_author_tag.get_text(strip=True) if username_author_tag else None
+                    thread_data['thread_title'] = link.get_text(" ", strip=True)
 
                     prefix_label = title_div.find('span', class_='label')
-                    thread_data['prefix'] = prefix_label.text.strip() if prefix_label else None
+                    thread_data['prefix'] = prefix_label.get_text(" ", strip=True) if prefix_label else None
 
                     thread_data['username_author_color'] = '#fff'
                     if username_author_tag:
@@ -645,29 +737,30 @@ class ArizonaAPI:
                                 thread_data['username_author_color'] = color
                                 break
 
-                    start_date_li = minor_div.find('li', 'structItem-startDate') if minor_div else None
+                    start_date_li = parts_ul.find('li', class_='structItem-startDate') if parts_ul else None
                     time_tag = start_date_li.find('time', class_='u-dt') if start_date_li else None
-                    created_date = time_tag.get('data-time') if time_tag else None
-                    thread_data['created_date'] = int(created_date) if created_date and created_date.isdigit() else None
+                    created_date = time_tag.get('data-timestamp') if time_tag else None
+                    thread_data['created_date'] = int(created_date) if created_date and str(created_date).isdigit() else None
 
-                    latest_cell = thread.find('div', 'structItem-cell--latest')
-                    last_message_username_tag = latest_cell.find('div', 'structItem-minor').find(class_=compile('username')) if latest_cell else None
-                    thread_data['username_last_message'] = last_message_username_tag.text.strip() if last_message_username_tag else None
+                    latest_cell = thread.find('div', class_='structItem-cell--latest')
+                    latest_minor_div = latest_cell.find('div', class_='structItem-minor') if latest_cell else None
+                    last_message_username_tag = latest_minor_div.find(class_=compile(r'username')) if latest_minor_div else None
+                    thread_data['username_last_message'] = last_message_username_tag.get_text(strip=True) if last_message_username_tag else None
 
                     thread_data['username_last_message_color'] = '#fff'
                     if last_message_username_tag:
-                         for style, color in ROLE_COLOR.items():
+                        for style, color in ROLE_COLOR.items():
                             if style in str(last_message_username_tag):
                                 thread_data['username_last_message_color'] = color
                                 break
 
                     latest_date_tag = latest_cell.find('time', class_='structItem-latestDate') if latest_cell else None
-                    last_message_date = latest_date_tag.get('data-time') if latest_date_tag else None
-                    thread_data['last_message_date'] = int(last_message_date) if last_message_date and last_message_date.isdigit() else None
+                    last_message_date = latest_date_tag.get('data-timestamp') if latest_date_tag else None
+                    thread_data['last_message_date'] = int(last_message_date) if last_message_date and str(last_message_date).isdigit() else None
 
                     thread_data['thread_id'] = thread_id
-                    thread_data['is_pinned'] = len(thread.find_all('i', {'title': 'Закреплено'})) > 0
-                    thread_data['is_closed'] = len(thread.find_all('i', {'title': 'Закрыта'})) > 0
+                    thread_data['is_pinned'] = bool(thread.find('i', {'title': 'Закреплено'}))
+                    thread_data['is_closed'] = bool(thread.find('i', {'title': 'Закрыта'}))
 
                     result.append(thread_data)
 
@@ -1345,7 +1438,7 @@ class ArizonaAPI:
                     if time_tag:
                         timestamp = {
                             'iso': time_tag.get('datetime'),
-                            'unix': int(time_tag['data-time']) if time_tag and time_tag.has_attr('data-time') and time_tag['data-time'].isdigit() else None
+                            'unix': int(time_tag['data-timestamp']) if time_tag and time_tag.has_attr('data-timestamp') and time_tag['data-timestamp'].isdigit() else None
                         }
 
                     alert_text_container = alert.find('div', {'class': 'contentRow-main'})
@@ -1418,16 +1511,24 @@ class ArizonaAPI:
                     if not title_link:
                         continue
 
-                    for sp in title_link.select('span.label, span.label-append'):
-                        sp.extract()
-                    title_clean = title_link.get_text(strip=True)
+                    title_link_clone = BeautifulSoup(str(title_link), 'lxml').select_one('a')
+                    for sp in title_link_clone.select('span.label, span.label-append'):
+                        sp.decompose()
+
+                    title_clean = title_link_clone.get_text(" ", strip=True)
+                    title_clean = re.sub(r'\s+', ' ', title_clean).strip()
 
                     date_tag = thread.find('time', {'class': 'u-dt'})
                     answers_tag = thread.find(string=re.compile('Ответы: '))
 
+                    author_tag = thread.select_one('a.username[data-user-id]')
+                    author_id = int(author_tag['data-user-id']) if author_tag and author_tag.has_attr('data-user-id') else None
+                    author_name = author_tag.get_text(strip=True) if author_tag else thread.get('data-author')
+
                     thread_data = {
                         'title': title_clean,
-                        'author': thread.get('data-author'),
+                        'author': author_name,
+                        'author_id': author_id,
                         'thread_id': int(title_link['href'].split('/')[-2]),
                         'create_date': int(date_tag['data-timestamp']) if date_tag else None,
                         'answers_count': int(answers_tag.split(': ')[1]) if answers_tag else 0,
@@ -1631,7 +1732,7 @@ class ArizonaAPI:
             delta = datetime.timedelta(days=365)
             period_str = "год"
         else:
-            print(f"Ошибка: Неверное значение duration '{duration}'. Используйте 'day', 'week' или 'month'.")
+            print(f"Ошибка: Неверное значение duration '{duration}'. Используйте 'day', 'week', 'month' или 'year'.")
             return None
 
         start_timestamp = int((now - delta).timestamp())
@@ -1890,9 +1991,9 @@ class ArizonaAPI:
                                     post_author_name = post_author_tag.text.strip()
 
                                 post_timestamp = 0
-                                post_time_tag = post_article.find('time', class_='u-dt', attrs={'data-time': True})
-                                if post_time_tag and post_time_tag.get('data-time','').isdigit():
-                                    post_timestamp = int(post_time_tag['data-time'])
+                                post_time_tag = post_article.find('time', class_='u-dt', attrs={'data-timestamp': True})
+                                if post_time_tag and post_time_tag.get('data-timestamp', '').isdigit():
+                                    post_timestamp = int(post_time_tag['data-timestamp'])
                                 else:
                                     continue
 
@@ -1935,3 +2036,5 @@ class ArizonaAPI:
         }
 
         return result
+
+ArizonaAPI = ArizonaForumAPI

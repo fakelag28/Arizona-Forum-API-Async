@@ -3,11 +3,10 @@ import arizona_forum_async as arz_api
 import json
 
 async def main():
-    cookies = {"xf_user": "",
-              "xf_tfa_trust": "", 
-              "xf_session": ""}
+    cookies = {"xf_user": "your",
+              "xf_tfa_trust": "your"}
 
-    forum_api = arz_api.ArizonaAPI(user_agent="user_agent", cookie=cookies)
+    forum_api = arz_api.ArizonaForumAPI(cookie=cookies)
 
     try:
         await forum_api.connect()
