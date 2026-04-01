@@ -18,7 +18,7 @@ from arizona_forum_async.models.member_object import Member, CurrentMember
 from arizona_forum_async.models.thread_object import Thread
 from arizona_forum_async.models.category_object import Category
 
-__version__ = "1.5"
+__version__ = "1.6"
 
 class ArizonaForumAPI:
     def __init__(self, user_agent: Optional[str] = None, cookie: dict = None) -> None:
@@ -2036,5 +2036,342 @@ class ArizonaForumAPI:
         }
 
         return result
+
+    async def get_threads_from_vote_category(self, category_id: int, page: int = 1) -> Optional[List[Dict]]:
+        """
+        Получает список тем из категории с голосованием.
+        Отличие от обычного get_thread_category_detail в том, что возвращает дополнительно количество голосов в теме.
+
+        Args:
+            category_id (int): ID категории форума с голосованием.
+            page (int): Номер страницы для пагинации. По умолчанию 1.
+
+        Returns:
+            Optional[List[Dict]]: Список словарей с данными о темах или None в случае ошибки.
+                Каждый словарь содержит:
+                {
+                    'thread_id': int,
+                    'thread_title': str,
+                    'prefix': Optional[str],
+                    'username_author': str,
+                    'username_author_color': str,
+                    'created_date': int,
+                    'username_last_message': Optional[str],
+                    'username_last_message_color': str,
+                    'last_message_date': Optional[int],
+                    'is_pinned': bool,
+                    'is_closed': bool,
+                    'votes_count': int,  # Количество голосов в теме
+                }
+        """
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        token = await self.token
+        url = f"{MAIN_URL}/forums/{category_id}/page-{page}"
+        params = {'_xfResponseType': 'json', '_xfToken': token}
+        try:
+            async with self._session.get(url, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+                if data.get('status') == 'error':
+                    return None
+
+                html_content = unescape(data['html']['content'])
+                soup = BeautifulSoup(html_content, "lxml")
+                result = []
+                seen_thread_ids = set()
+
+                for thread in soup.find_all('div', class_=compile(r'structItem structItem--thread.*')):
+                    title_div = thread.find('div', class_='structItem-title')
+                    if not title_div:
+                        continue
+
+                    link_tags = title_div.find_all("a")
+                    if not link_tags:
+                        continue
+
+                    link = link_tags[-1]
+
+                    thread_ids = findall(r'\d+', link.get('href', ''))
+                    if not thread_ids:
+                        continue
+                    thread_id = int(thread_ids[0])
+
+                    if thread_id in seen_thread_ids:
+                        continue
+                    seen_thread_ids.add(thread_id)
+
+                    thread_data = {}
+
+                    vote_span = thread.find('span', class_=lambda c: c and 'contentVote-score' in c and 'js-voteCount' in c)
+                    thread_data['votes_count'] = int(vote_span.get_text(strip=True)) if vote_span else 0
+
+                    main_cell = thread.find('div', class_='structItem-cell--main')
+                    minor_div = main_cell.find('div', class_='structItem-minor') if main_cell else None
+                    parts_ul = minor_div.find('ul', class_='structItem-parts') if minor_div else None
+
+                    username_author_tag = parts_ul.find('a', class_='username') if parts_ul else None
+                    thread_data['username_author'] = username_author_tag.get_text(strip=True) if username_author_tag else None
+                    thread_data['thread_title'] = link.get_text(" ", strip=True)
+
+                    prefix_label = title_div.find('span', class_='label')
+                    thread_data['prefix'] = prefix_label.get_text(" ", strip=True) if prefix_label else None
+
+                    thread_data['username_author_color'] = '#fff'
+                    if username_author_tag:
+                        for style, color in ROLE_COLOR.items():
+                            if style in str(username_author_tag):
+                                thread_data['username_author_color'] = color
+                                break
+
+                    start_date_li = parts_ul.find('li', class_='structItem-startDate') if parts_ul else None
+                    time_tag = start_date_li.find('time', class_='u-dt') if start_date_li else None
+                    created_date = time_tag.get('data-timestamp') if time_tag else None
+                    thread_data['created_date'] = int(created_date) if created_date and str(created_date).isdigit() else None
+
+                    latest_cell = thread.find('div', class_='structItem-cell--latest')
+                    latest_minor_div = latest_cell.find('div', class_='structItem-minor') if latest_cell else None
+                    last_message_username_tag = latest_minor_div.find(class_=compile(r'username')) if latest_minor_div else None
+                    thread_data['username_last_message'] = last_message_username_tag.get_text(strip=True) if last_message_username_tag else None
+
+                    thread_data['username_last_message_color'] = '#fff'
+                    if last_message_username_tag:
+                        for style, color in ROLE_COLOR.items():
+                            if style in str(last_message_username_tag):
+                                thread_data['username_last_message_color'] = color
+                                break
+
+                    latest_date_tag = latest_cell.find('time', class_='structItem-latestDate') if latest_cell else None
+                    last_message_date = latest_date_tag.get('data-timestamp') if latest_date_tag else None
+                    thread_data['last_message_date'] = int(last_message_date) if last_message_date and str(last_message_date).isdigit() else None
+
+                    thread_data['thread_id'] = thread_id
+                    thread_data['is_pinned'] = bool(thread.find('i', {'title': 'Закреплено'}))
+                    thread_data['is_closed'] = bool(thread.find('i', {'title': 'Закрыта'}))
+
+                    result.append(thread_data)
+
+                return result
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при получении тем из категории с голосованием {category_id} (страница {page}): {e}")
+            return None
+        except Exception as e:
+            print(f"Неожиданная ошибка при получении тем из категории с голосованием {category_id} (страница {page}): {e}")
+            return None
+
+    async def get_vote_thread_detail(self, thread_id: int) -> Optional[Dict]:
+        """
+        Получает детальную информацию о теме из категории с голосованием.
+        Возвращает информацию о первом посте и количестве голосов в теме.
+
+        Args:
+            thread_id (int): ID темы с голосованием.
+
+        Returns:
+            Optional[Dict]: Словарь с данными о теме и первом посте или None в случае ошибки.
+                Структура словаря:
+                {
+                    'thread_id': int,
+                    'votes_count': int,  # Количество голосов в теме
+                    'first_post': {
+                        'post_id': int,
+                        'author_username': str,
+                        'author_title': Optional[str],  # Должность/звание
+                        'author_banner': Optional[str],  # Баннер пользователя
+                        'registration_date': str,
+                        'messages_count': str,
+                        'reactions_count': str,
+                        'server': Optional[str],  # Сервер из профиля
+                        'posted_date': int,  # Timestamp даты публикации
+                        'posted_date_str': str,  # Строковое представление даты
+                        'content_html': str,  # HTML содержимое поста
+                        'last_edit_date': Optional[int],  # Timestamp последнего редактирования
+                        'last_edit_date_str': Optional[str],
+                        'reactions': List[int],  # Список ID реакций
+                        'reactions_users': str,  # Строка с пользователями, поставившими реакции
+                    }
+                }
+        """
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        token = await self.token
+        url = f"{MAIN_URL}/threads/{thread_id}/"
+        params = {'_xfResponseType': 'json', '_xfToken': token}
+        try:
+            async with self._session.get(url, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+                if data.get('status') == 'error':
+                    return None
+
+                html_content = unescape(data['html']['content'])
+                soup = BeautifulSoup(html_content, "lxml")
+                
+                result = {
+                    'thread_id': thread_id,
+                    'votes_count': 0,
+                    'first_post': None
+                }
+
+                vote_span = soup.find('span', class_=lambda c: c and 'contentVote-score' in c and 'js-voteCount' in c)
+                if vote_span:
+                    votes_text = vote_span.get_text(strip=True)
+                    result['votes_count'] = int(votes_text) if votes_text.isdigit() else 0
+
+                first_post = soup.find('article', class_=lambda c: c and 'message--post' in c and 'is-first' in c)
+                if not first_post:
+                    return result
+
+                post_data = {}
+
+                post_id_attr = first_post.get('data-content')
+                if post_id_attr:
+                    post_ids = findall(r'\d+', post_id_attr)
+                    post_data['post_id'] = int(post_ids[0]) if post_ids else None
+                else:
+                    post_data['post_id'] = None
+
+                user_section = first_post.find('section', class_='message-user')
+                if user_section:
+                    username_tag = user_section.find('h4', class_='message-name').find('a', class_='username')
+                    post_data['author_username'] = username_tag.get_text(strip=True) if username_tag else None
+
+                    title_tag = user_section.find('h5', class_='userTitle message-userTitle')
+                    post_data['author_title'] = title_tag.get_text(strip=True) if title_tag else None
+
+                    banner_tag = user_section.find('div', class_='userBanner userBanner--img')
+                    post_data['author_banner'] = banner_tag.find('strong').get_text(strip=True) if banner_tag else None
+
+                    pairs = user_section.find_all('dl', class_='pairs pairs--justified')
+                    for pair in pairs:
+                        dt = pair.find('dt')
+                        dd = pair.find('dd')
+                        if dt and dd:
+                            field_name = dt.get_text(strip=True)
+                            field_value = dd.get_text(strip=True)
+                            if field_name == 'Регистрация':
+                                post_data['registration_date'] = field_value
+                            elif field_name == 'Сообщения':
+                                post_data['messages_count'] = field_value
+                            elif field_name == 'Реакции':
+                                post_data['reactions_count'] = field_value
+                            elif field_name == 'Сервер':
+                                post_data['server'] = field_value
+                else:
+                    post_data['author_username'] = None
+                    post_data['author_title'] = None
+                    post_data['author_banner'] = None
+                    post_data['registration_date'] = None
+                    post_data['messages_count'] = None
+                    post_data['reactions_count'] = None
+                    post_data['server'] = None
+
+                attribution = first_post.find('header', class_='message-attribution')
+                if attribution:
+                    time_tag = attribution.find('time', class_='u-dt')
+                    if time_tag:
+                        timestamp = time_tag.get('data-timestamp')
+                        post_data['posted_date'] = int(timestamp) if timestamp and str(timestamp).isdigit() else None
+                        post_data['posted_date_str'] = time_tag.get_text(strip=True)
+                    else:
+                        post_data['posted_date'] = None
+                        post_data['posted_date_str'] = None
+                else:
+                    post_data['posted_date'] = None
+                    post_data['posted_date_str'] = None
+
+                message_body = first_post.find('article', class_='message-body js-selectToQuote')
+                post_data['content_html'] = str(message_body) if message_body else ''
+
+                last_edit = first_post.find('div', class_='message-lastEdit')
+                if last_edit:
+                    edit_time = last_edit.find('time', class_='u-dt')
+                    if edit_time:
+                        edit_timestamp = edit_time.get('data-timestamp')
+                        post_data['last_edit_date'] = int(edit_timestamp) if edit_timestamp and str(edit_timestamp).isdigit() else None
+                        post_data['last_edit_date_str'] = edit_time.get_text(strip=True)
+                    else:
+                        post_data['last_edit_date'] = None
+                        post_data['last_edit_date_str'] = None
+                else:
+                    post_data['last_edit_date'] = None
+                    post_data['last_edit_date_str'] = None
+
+                reactions = []
+                reactions_bar = first_post.find('div', class_='reactionsBar js-reactionsList')
+                if reactions_bar:
+                    reaction_spans = reactions_bar.find_all('span', class_='reaction')
+                    for reaction_span in reaction_spans:
+                        reaction_id = reaction_span.get('data-reaction-id')
+                        if reaction_id and str(reaction_id).isdigit():
+                            reactions.append(int(reaction_id))
+                post_data['reactions'] = reactions
+
+                reactions_link = reactions_bar.find('a', class_='reactionsBar-link') if reactions_bar else None
+                post_data['reactions_users'] = reactions_link.get_text(strip=True) if reactions_link else None
+
+                result['first_post'] = post_data
+                return result
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при получении темы с голосованием {thread_id}: {e}")
+            return None
+        except Exception as e:
+            print(f"Неожиданная ошибка при получении темы с голосованием {thread_id}: {e}")
+            return None
+
+    async def vote_thread(self, thread_id: int, vote_type: str = 'up') -> Optional[Dict]:
+        """
+        Голосует за тему в категории с голосованием или снимает голос.
+
+        Args:
+            thread_id (int): ID темы для голосования.
+            vote_type (str): Тип голоса - 'up' для голосования, 'down' для снятия голоса. По умолчанию 'up'.
+
+        Returns:
+            Optional[Dict]: Словарь с результатом голосования или None в случае ошибки.
+                Структура словаря:
+                {
+                    'status': str,  # 'ok' или 'error'
+                    'message': str,  # Сообщение от сервера ('Голос учтён' или 'Голос удалён')
+                    'vote': Optional[str],  # 'up' если голос учтён, None если снят
+                    'vote_score': int,  # Общее количество голосов
+                    'vote_score_short': str,  # Краткое представление количества голосов
+                }
+        """
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        token = await self.token
+        url = f"{MAIN_URL}/threads/{thread_id}/vote"
+        params = {
+            '_xfRequestUri': f"/threads/{thread_id}/",
+            '_xfResponseType': 'json',
+            '_xfToken': token,
+            '_xfWithData': 1,
+            'type': vote_type
+        }
+        try:
+            async with self._session.post(url, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+                if data.get('status') == 'error':
+                    return None
+
+                result = {
+                    'status': data.get('status'),
+                    'message': data.get('message'),
+                    'vote': data.get('vote'),
+                    'vote_score': data.get('voteScore'),
+                    'vote_score_short': data.get('voteScoreShort')
+                }
+                return result
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при голосовании за тему {thread_id}: {e}")
+            return None
+        except Exception as e:
+            print(f"Неожиданная ошибка при голосовании за тему {thread_id}: {e}")
+            return None
 
 ArizonaAPI = ArizonaForumAPI
