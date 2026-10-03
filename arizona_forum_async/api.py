@@ -8,7 +8,7 @@ from collections import defaultdict
 import datetime
 
 from arizona_forum_async.consts import MAIN_URL, ROLE_COLOR, DEFAULT_USER_AGENT
-from arizona_forum_async.bypass_antibot import bypass_async
+from arizona_forum_async.bypass_antibot import bypass_async, build_session
 from arizona_forum_async._update_check import check_for_updates_async
 
 from arizona_forum_async.exceptions import IncorrectLoginData, ThisIsYouError
@@ -18,11 +18,13 @@ from arizona_forum_async.models.member_object import Member, CurrentMember
 from arizona_forum_async.models.thread_object import Thread
 from arizona_forum_async.models.category_object import Category
 
-__version__ = "1.6"
+__version__ = "1.7"
 
 class ArizonaForumAPI:
-    def __init__(self, user_agent: Optional[str] = None, cookie: dict = None) -> None:
+    def __init__(self, user_agent: Optional[str] = None, cookie: dict = None,
+                 proxy: Optional[str] = None) -> None:
         self.user_agent = user_agent or DEFAULT_USER_AGENT
+        self.proxy = proxy
         check_for_updates_async(__version__)
 
         self.cookie_str = "; ".join([f"{k}={v}" for k, v in cookie.items()]) if cookie else ""
@@ -35,20 +37,21 @@ class ArizonaForumAPI:
         if self._session is None or self._session.closed:
             cookies = {}
             for item in self.cookie_str.split('; '):
+                if '=' not in item:
+                    continue
                 name, value = item.strip().split('=', 1)
                 cookies[name] = value
 
-            if do_bypass:
-                bypass_cookie_str, _ = await bypass_async(self.user_agent)
-                name, value = bypass_cookie_str.split('=', 1)
-                cookies[name] = value
-
-            self._session = aiohttp.ClientSession(
+            self._session = build_session(
+                self.proxy,
                 headers={"user-agent": self.user_agent},
                 cookies=cookies
             )
 
             try:
+                if do_bypass:
+                    await bypass_async(self._session)
+
                 async with self._session.get(f"{MAIN_URL}/account/") as response:
                     response.raise_for_status()
                     html_content_main = await response.text()

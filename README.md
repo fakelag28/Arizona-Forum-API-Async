@@ -66,6 +66,18 @@ python -m pip install .
 * xf_tfa_trust
 * xf_user
 
+## 🌐 Прокси
+
+Все запросы библиотеки (включая обход анти-бота) можно направить через прокси:
+
+```python
+forum_api = arz_api.ArizonaForumAPI(cookie=cookies, proxy="socks5://login:password@1.2.3.4:1080")
+```
+
+Поддерживаются схемы `http`, `https`, `socks4`, `socks4a`, `socks5`, `socks5h`. Если схема не указана, подставляется `http://`, поэтому можно передавать и просто `1.2.3.4:8080`.
+
+При неверной схеме выбрасывается исключение `IncorrectProxyData`.
+
 ## 📚 Документация и примеры
 
 *   **[Папка с примерами](https://github.com/fakelag28/Arizona-Forum-API-Async/tree/main/examples):** Практические примеры, демонстрирующие различные возможности библиотеки.

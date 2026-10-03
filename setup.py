@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="arizona-forum-api-async",
-    version="1.6",
+    version="1.7",
     author="fakelag28",
     author_email="fakelag712@gmail.com",
     description="Асинхронная Python библиотека для взаимодействия с форумом Arizona RP (forum.arizona-rp.com) без необходимости получения API ключа.",
@@ -23,7 +23,7 @@ setup(
         "aiohttp",
         "aiohttp-socks",
         "beautifulsoup4",
-        "dukpy",
         "lxml",
+        "yarl",
     ],
 ) 
