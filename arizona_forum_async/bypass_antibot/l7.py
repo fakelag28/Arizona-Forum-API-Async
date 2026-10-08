@@ -13,8 +13,9 @@ from arizona_forum_async.consts import DEFAULT_USER_AGENT, MAIN_URL
 from arizona_forum_async.consts import SUPPORTED_PROXY_SCHEMES
 from arizona_forum_async.exceptions import IncorrectProxyData
 
-CHALLENGE_PATH = "/__l7_challenge/"
 CLEARANCE_COOKIE = "__Host-l7_clearance"
+
+CHALLENGE_MARKER = 'id="l7-config"'
 
 _CONFIG_RE = re.compile(
     r'data-([\w-]+)=(?:"([^"]*)"|\'([^\']*)\'|\s*([^\s>]+))'
@@ -25,12 +26,24 @@ _UNPACK_I = struct.Struct(">I").unpack
 
 _CHALLENGE_RETRY_DELAYS = (0.0, 2.0, 5.0)
 
+_BROWSER_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+}
+
 
 def _parse_config(html: str) -> dict:
     config = {}
     for key, double, single, bare in _CONFIG_RE.findall(html):
         config[key] = double or single or bare
     return config
+
+
+def _looks_like_challenge(body: str) -> bool:
+    if CHALLENGE_MARKER in body or CHALLENGE_MARKER.replace('"', "'") in body:
+        return True
+    config = _parse_config(body)
+    return "init" in config and "verify" in config and "confirm" in config
 
 
 def _clearance_value(session: aiohttp.ClientSession) -> Optional[str]:
@@ -60,6 +73,9 @@ def _normalize_proxy(proxy: Optional[str]) -> Optional[str]:
 
 def build_session(proxy: Optional[str] = None, **kwargs) -> aiohttp.ClientSession:
     proxy = _normalize_proxy(proxy)
+    headers = dict(_BROWSER_HEADERS)
+    headers.update(kwargs.pop("headers", None) or {})
+    kwargs["headers"] = headers
     if proxy is not None:
         from aiohttp_socks import ProxyConnector
 
@@ -82,10 +98,11 @@ def _worker(job):
 def _solve_sync(nonce_hex: str, difficulty: int, workers: Optional[int] = None) -> int:
     mask = (0xFFFFFFFF << (32 - difficulty)) & 0xFFFFFFFF
     workers = workers or min(os.cpu_count() or 1, 16)
-    if workers <= 1:
-        return _worker((nonce_hex, 0, 0, 0x100000000, mask))
 
     import multiprocessing
+
+    if workers <= 1 or multiprocessing.current_process().name != "MainProcess":
+        return _worker((nonce_hex, 0, 0, 0x100000000, mask))
 
     step = 0x100000000 // workers
     jobs = [
@@ -111,32 +128,34 @@ class L7ChallengeError(Exception):
 
 
 async def _read_config(session: aiohttp.ClientSession) -> dict:
-    async with session.get(f"{MAIN_URL}{CHALLENGE_PATH}") as resp:
+    async with session.get(f"{MAIN_URL}/") as resp:
         resp.raise_for_status()
         body = await resp.text(errors="replace")
     config = _parse_config(body)
-    if "init" not in config or "verify" not in config:
+    if "init" not in config or "verify" not in config or "confirm" not in config:
         raise L7ChallengeError("Не удалось прочитать конфигурацию L7-челленджа.")
     return config
 
 
 async def _is_challenged(session: aiohttp.ClientSession) -> bool:
     async with session.get(f"{MAIN_URL}/", allow_redirects=False) as resp:
-        if resp.status == 200:
-            ctype = resp.headers.get("Content-Type", "")
-            if "application/json" not in ctype:
-                return False
-        try:
-            data = await resp.json(content_type=None)
-        except Exception:
+        if resp.status != 200:
             return False
-    return isinstance(data, dict) and data.get("error") == "challenge"
+        if "application/json" in resp.headers.get("Content-Type", ""):
+            try:
+                data = await resp.json(content_type=None)
+            except Exception:
+                return False
+            return isinstance(data, dict) and data.get("error") == "challenge"
+        body = await resp.text(errors="replace")
+    return _looks_like_challenge(body)
 
 
-async def solve_challenge(
+async def _solve_with_config(
     session: aiohttp.ClientSession,
-) -> Optional[str]:
-    config = await _read_config(session)
+    config: dict,
+) -> str:
+    flow = config.get("flow", "")
     last_error = None
 
     for delay in _CHALLENGE_RETRY_DELAYS:
@@ -146,7 +165,7 @@ async def solve_challenge(
         try:
             async with session.post(
                 f"{MAIN_URL}{config['init']}",
-                json={"webdriver": False},
+                json={"webdriver": False, "automation": [], "flow": flow},
                 headers={"Accept": "application/json"},
             ) as resp:
                 if resp.status == 429:
@@ -158,7 +177,7 @@ async def solve_challenge(
                 challenge = await resp.json(content_type=None)
 
             counter = await _solve(challenge["nonce"], int(challenge["difficulty"]))
-            solve_ms = int((time.perf_counter() - started) * 1000)
+            solve_ms = max(int((time.perf_counter() - started) * 1000), 1)
 
             async with session.post(
                 f"{MAIN_URL}{config['verify']}",
@@ -166,16 +185,36 @@ async def solve_challenge(
                     "token": challenge["token"],
                     "counter": str(counter),
                     "solve_ms": solve_ms,
+                    "flow": challenge.get("flow") or flow,
+                    "delivery": "",
                 },
+                headers={"Accept": "application/json"},
             ) as resp:
                 if resp.status != 200:
                     last_error = L7ChallengeError(f"/verify вернул {resp.status}")
+                    continue
+                verify = await resp.json(content_type=None)
+
+            receipt = verify.get("receipt")
+            if not receipt:
+                last_error = L7ChallengeError(
+                    "В ответе /verify отсутствует receipt."
+                )
+                continue
+
+            async with session.post(
+                f"{MAIN_URL}{config['confirm']}",
+                json={"receipt": receipt},
+                headers={"Accept": "application/json"},
+            ) as resp:
+                if resp.status != 200:
+                    last_error = L7ChallengeError(f"/confirm вернул {resp.status}")
                     continue
 
             clearance = _clearance_value(session)
             if clearance is None:
                 last_error = L7ChallengeError(
-                    "Куки __Host-l7_clearance не выставлена после /verify."
+                    "Куки __Host-l7_clearance не выставлена после /confirm."
                 )
                 continue
             return clearance
@@ -185,6 +224,11 @@ async def solve_challenge(
     raise L7ChallengeError(
         f"Не удалось пройти L7-челлендж после {len(_CHALLENGE_RETRY_DELAYS)} попыток: {last_error}"
     )
+
+
+async def solve_challenge(session: aiohttp.ClientSession) -> str:
+    config = await _read_config(session)
+    return await _solve_with_config(session, config)
 
 
 async def bypass_async(session: Optional[aiohttp.ClientSession] = None) -> str:

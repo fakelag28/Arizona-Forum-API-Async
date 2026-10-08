@@ -18,7 +18,7 @@ from arizona_forum_async.models.member_object import Member, CurrentMember
 from arizona_forum_async.models.thread_object import Thread
 from arizona_forum_async.models.category_object import Category
 
-__version__ = "1.7"
+__version__ = "1.8"
 
 class ArizonaForumAPI:
     def __init__(self, user_agent: Optional[str] = None, cookie: dict = None,
