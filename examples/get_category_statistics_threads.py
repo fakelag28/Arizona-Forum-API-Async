@@ -4,8 +4,8 @@ import arizona_forum_async as arz_api
 
 
 async def main():
-    cookies = {"xf_user": "your",
-              "xf_tfa_trust": "your"}
+    cookies = {"xf_user": "1058071%2C6MggSv724ICEF6wWGJ3VUxhTiyRCJMe_SjQFmgEO",
+              "xf_tfa_trust": "yK2OW_RMtCLg6BTspC5NrgDMhqTCp4Pw"}
 
     forum_api = arz_api.ArizonaForumAPI(cookie=cookies)
 

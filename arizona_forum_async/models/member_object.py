@@ -98,16 +98,23 @@ class CurrentMember(Member):
         """
 
         with open(upload_photo, 'rb') as image:
-            file_dict = {'upload': (upload_photo, image.read())}
-        
-        token = BeautifulSoup(self.API.session.get(f"{MAIN_URL}/help/terms/").content, 'lxml').find('html')['data-csrf']
+            image_data = image.read()
+
+        async with self.API.session.get(f"{MAIN_URL}/help/terms/") as response:
+            response.raise_for_status()
+            html = await response.text()
+        token = BeautifulSoup(html, 'lxml').find('html')['data-csrf']
         data = {
             "avatar_crop_x": 0, 
             "avatar_crop_y": 0,
             "_xfToken": token, 
             "use_custom": 1,
         }
-        return await self.API.session.post(f"{MAIN_URL}/account/avatar", files=file_dict, data=data)
+        form = aiohttp.FormData()
+        for key, value in data.items():
+            form.add_field(key, str(value))
+        form.add_field("upload", image_data, filename=upload_photo)
+        return await self.API.session.post(f"{MAIN_URL}/account/avatar", data=form)
     
 
     async def delete_avatar(self) -> aiohttp.ClientResponse:
@@ -116,8 +123,10 @@ class CurrentMember(Member):
         Returns:
             Объект Response модуля requests
         """
-        token = BeautifulSoup(self.API.session.get(f"{MAIN_URL}/help/terms/").content, 'lxml').find('html')['data-csrf']
-        file_dict = {'upload': ("", "")}
+        async with self.API.session.get(f"{MAIN_URL}/help/terms/") as response:
+            response.raise_for_status()
+            html = await response.text()
+        token = BeautifulSoup(html, 'lxml').find('html')['data-csrf']
         data = {
             "avatar_crop_x": 0, 
             "avatar_crop_y": 0,
@@ -125,5 +134,8 @@ class CurrentMember(Member):
             "use_custom": 1,
             "delete_avatar": 1
         }
-
-        return await self.API.session.post(f"{MAIN_URL}/account/avatar", files=file_dict, data=data)
+        form = aiohttp.FormData()
+        for key, value in data.items():
+            form.add_field(key, str(value))
+        form.add_field("upload", "", filename="")
+        return await self.API.session.post(f"{MAIN_URL}/account/avatar", data=form)

@@ -78,6 +78,19 @@ forum_api = arz_api.ArizonaForumAPI(cookie=cookies, proxy="socks5://login:passwo
 
 При неверной схеме выбрасывается исключение `IncorrectProxyData`.
 
+## 📝 Логирование
+
+Библиотека использует стандартный модуль `logging` и по умолчанию не выводит логи в консоль. Чтобы включить подробное логирование:
+
+```python
+import logging
+import arizona_forum_async as arz_api
+
+arz_api.configure_logging(level=logging.DEBUG)
+```
+
+Логи включают подключение, закрытие сессии, прохождение очереди, HTTP-статусы, длительность запросов, сетевые ошибки и события L7-антибота. Cookie, CSRF-токены и тела запросов в лог не записываются.
+
 ## 📚 Документация и примеры
 
 *   **[Папка с примерами](https://github.com/fakelag28/Arizona-Forum-API-Async/tree/main/examples):** Практические примеры, демонстрирующие различные возможности библиотеки.

@@ -12,6 +12,13 @@ import yarl
 from arizona_forum_async.consts import DEFAULT_USER_AGENT, MAIN_URL
 from arizona_forum_async.consts import SUPPORTED_PROXY_SCHEMES
 from arizona_forum_async.exceptions import IncorrectProxyData
+from arizona_forum_async.logging_config import LOGGER
+from arizona_forum_async.request_queue import (
+    RequestQueue,
+    get_shared_request_queue,
+    get_session_queue,
+    register_session_queue,
+)
 
 CLEARANCE_COOKIE = "__Host-l7_clearance"
 
@@ -71,7 +78,11 @@ def _normalize_proxy(proxy: Optional[str]) -> Optional[str]:
     return proxy
 
 
-def build_session(proxy: Optional[str] = None, **kwargs) -> aiohttp.ClientSession:
+def build_session(
+    proxy: Optional[str] = None,
+    request_queue: Optional[RequestQueue] = None,
+    **kwargs,
+) -> aiohttp.ClientSession:
     proxy = _normalize_proxy(proxy)
     headers = dict(_BROWSER_HEADERS)
     headers.update(kwargs.pop("headers", None) or {})
@@ -80,7 +91,57 @@ def build_session(proxy: Optional[str] = None, **kwargs) -> aiohttp.ClientSessio
         from aiohttp_socks import ProxyConnector
 
         kwargs["connector"] = ProxyConnector.from_url(proxy)
-    return aiohttp.ClientSession(**kwargs)
+    queue = request_queue or get_shared_request_queue(proxy)
+    trace_configs = list(kwargs.pop("trace_configs", None) or ())
+    trace_configs.append(queue.trace_config())
+    trace_configs.append(_request_logging_trace_config())
+    kwargs["trace_configs"] = trace_configs
+    session = aiohttp.ClientSession(**kwargs)
+    register_session_queue(session, queue)
+    return session
+
+
+def _request_logging_trace_config() -> aiohttp.TraceConfig:
+    trace_config = aiohttp.TraceConfig()
+
+    async def on_request_start(session, trace_config_ctx, params) -> None:
+        trace_config_ctx.started_at = time.monotonic()
+        trace_config_ctx.method = params.method
+        trace_config_ctx.path = params.url.path
+
+    async def on_request_end(session, trace_config_ctx, params) -> None:
+        started_at = getattr(trace_config_ctx, "started_at", None)
+        duration = time.monotonic() - started_at if started_at else 0.0
+        message = (
+            "HTTP %s %s -> %s за %.3fs",
+            getattr(trace_config_ctx, "method", params.method),
+            getattr(trace_config_ctx, "path", params.url.path),
+            params.response.status,
+            duration,
+        )
+        if params.response.status >= 400:
+            LOGGER.warning(*message)
+        else:
+            LOGGER.debug(*message)
+
+    async def on_request_exception(session, trace_config_ctx, params) -> None:
+        LOGGER.error(
+            "Ошибка HTTP %s %s: %s",
+            getattr(trace_config_ctx, "method", "UNKNOWN"),
+            getattr(trace_config_ctx, "path", ""),
+            type(params.exception).__name__,
+        )
+
+    trace_config.on_request_start.append(on_request_start)
+    trace_config.on_request_end.append(on_request_end)
+    trace_config.on_request_exception.append(on_request_exception)
+    return trace_config
+
+
+async def _request(session: aiohttp.ClientSession, method: str, *args, **kwargs):
+    if get_session_queue(session) is None:
+        await get_shared_request_queue().acquire()
+    return getattr(session, method)(*args, **kwargs)
 
 
 def _worker(job):
@@ -128,7 +189,7 @@ class L7ChallengeError(Exception):
 
 
 async def _read_config(session: aiohttp.ClientSession) -> dict:
-    async with session.get(f"{MAIN_URL}/") as resp:
+    async with await _request(session, "get", f"{MAIN_URL}/") as resp:
         resp.raise_for_status()
         body = await resp.text(errors="replace")
     config = _parse_config(body)
@@ -138,7 +199,12 @@ async def _read_config(session: aiohttp.ClientSession) -> dict:
 
 
 async def _is_challenged(session: aiohttp.ClientSession) -> bool:
-    async with session.get(f"{MAIN_URL}/", allow_redirects=False) as resp:
+    async with await _request(
+        session,
+        "get",
+        f"{MAIN_URL}/",
+        allow_redirects=False,
+    ) as resp:
         if resp.status != 200:
             return False
         if "application/json" in resp.headers.get("Content-Type", ""):
@@ -163,7 +229,9 @@ async def _solve_with_config(
             await asyncio.sleep(delay)
         started = time.perf_counter()
         try:
-            async with session.post(
+            async with await _request(
+                session,
+                "post",
                 f"{MAIN_URL}{config['init']}",
                 json={"webdriver": False, "automation": [], "flow": flow},
                 headers={"Accept": "application/json"},
@@ -179,7 +247,9 @@ async def _solve_with_config(
             counter = await _solve(challenge["nonce"], int(challenge["difficulty"]))
             solve_ms = max(int((time.perf_counter() - started) * 1000), 1)
 
-            async with session.post(
+            async with await _request(
+                session,
+                "post",
                 f"{MAIN_URL}{config['verify']}",
                 json={
                     "token": challenge["token"],
@@ -202,7 +272,9 @@ async def _solve_with_config(
                 )
                 continue
 
-            async with session.post(
+            async with await _request(
+                session,
+                "post",
                 f"{MAIN_URL}{config['confirm']}",
                 json={"receipt": receipt},
                 headers={"Accept": "application/json"},
@@ -236,7 +308,9 @@ async def bypass_async(session: Optional[aiohttp.ClientSession] = None) -> str:
     if own_session:
         session = build_session(headers={"user-agent": DEFAULT_USER_AGENT})
     try:
+        LOGGER.debug("Проверка L7-челленджа")
         if await _is_challenged(session):
+            LOGGER.info("Обнаружен L7-челлендж, запускается решение")
             await solve_challenge(session)
         return _clearance_value(session)
     finally:

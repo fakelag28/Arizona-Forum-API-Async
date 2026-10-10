@@ -17,14 +17,18 @@ from arizona_forum_async.models.post_object import Post, ProfilePost
 from arizona_forum_async.models.member_object import Member, CurrentMember
 from arizona_forum_async.models.thread_object import Thread
 from arizona_forum_async.models.category_object import Category
+from arizona_forum_async.logging_config import LOGGER
+from arizona_forum_async.request_queue import RequestQueue
 
-__version__ = "1.8"
+__version__ = "1.9"
 
 class ArizonaForumAPI:
     def __init__(self, user_agent: Optional[str] = None, cookie: dict = None,
-                 proxy: Optional[str] = None) -> None:
+                 proxy: Optional[str] = None,
+                 request_queue: Optional[RequestQueue] = None) -> None:
         self.user_agent = user_agent or DEFAULT_USER_AGENT
         self.proxy = proxy
+        self._request_queue = request_queue
         check_for_updates_async(__version__)
 
         self.cookie_str = "; ".join([f"{k}={v}" for k, v in cookie.items()]) if cookie else ""
@@ -34,6 +38,7 @@ class ArizonaForumAPI:
     
     async def connect(self, do_bypass: bool = True):
         """Асинхронный метод для создания сессии, получения токена и обхода анти-бота."""
+        LOGGER.info("Подключение к форуму: proxy=%s, bypass=%s", bool(self.proxy), do_bypass)
         if self._session is None or self._session.closed:
             cookies = {}
             for item in self.cookie_str.split('; '):
@@ -45,7 +50,8 @@ class ArizonaForumAPI:
             self._session = build_session(
                 self.proxy,
                 headers={"user-agent": self.user_agent},
-                cookies=cookies
+                cookies=cookies,
+                request_queue=self._request_queue,
             )
 
             try:
@@ -67,8 +73,13 @@ class ArizonaForumAPI:
                     self._token = soup.find('html')['data-csrf']
                     if not self._token:
                         raise Exception("Не удалось получить CSRF токен.")
+                LOGGER.info("Подключение к форуму успешно")
 
             except (aiohttp.ClientError, IncorrectLoginData, Exception) as e:
+                LOGGER.error(
+                    "Ошибка подключения или авторизации: %s",
+                    type(e).__name__,
+                )
                 if self._session:
                     await self._session.close()
                 self._session = None
@@ -77,7 +88,14 @@ class ArizonaForumAPI:
     async def close(self):
         """Асинхронный метод для закрытия сессии."""
         if self._session and not self._session.closed:
+            LOGGER.info("Закрытие сессии форума")
             await self._session.close()
+
+    @property
+    def session(self) -> aiohttp.ClientSession:
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        return self._session
     
     @property
     async def token(self) -> str:
