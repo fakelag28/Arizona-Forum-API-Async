@@ -863,11 +863,18 @@ class ArizonaForumAPI:
     async def get_thread_readers(self, thread_id: int) -> Optional[List[Dict]]:
         if not self._session or self._session.closed:
             raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        token = await self.token
         url = f"{MAIN_URL}/threads/{thread_id}/show-readers"
+        params = {'_xfResponseType': 'json', '_xfRequestUri': f"/threads/{thread_id}/", '_xfToken': token}
         try:
-            async with self._session.get(url) as response:
+            async with self._session.get(url, params=params) as response:
                 response.raise_for_status()
-                html_content = await response.text()
+                data = await response.json()
+
+                if data.get('status') == 'error':
+                    return None
+
+                html_content = unescape(data['html']['content'])
                 soup = BeautifulSoup(html_content, "lxml")
 
                 readers_tag = soup.find("ul", class_="listInline listInline--comma")
@@ -879,7 +886,8 @@ class ArizonaForumAPI:
 
                     reader_data["username"] = reader.get_text(strip=True)
                     reader_data["id"] = reader.get("data-user-id")
-
+                    reader_data["title"] = reader.get("title")
+                    
                     result.append(reader_data)
                 return result
         except aiohttp.ClientError as e:
