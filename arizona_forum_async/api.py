@@ -860,6 +860,43 @@ class ArizonaForumAPI:
             print(f"Неожиданная ошибка при получении дочерних категорий из {category_id}: {e}")
             return None
 
+    async def get_thread_readers(self, thread_id: int) -> Optional[List[Dict]]:
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        token = await self.token
+        url = f"{MAIN_URL}/threads/{thread_id}/show-readers"
+        params = {'_xfResponseType': 'json', '_xfRequestUri': f"/threads/{thread_id}/", '_xfToken': token}
+        try:
+            async with self._session.get(url, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+                if data.get('status') == 'error':
+                    return None
+
+                html_content = unescape(data['html']['content'])
+                soup = BeautifulSoup(html_content, "lxml")
+
+                readers_tag = soup.find("ul", class_="listInline listInline--comma")
+                if readers_tag is None: return []
+
+                result = []
+                for reader in readers_tag.find_all("a", class_="username"):
+                    reader_data = {}
+
+                    reader_data["username"] = reader.get_text(strip=True)
+                    reader_data["id"] = reader.get("data-user-id")
+                    reader_data["title"] = reader.get("title")
+                    
+                    result.append(reader_data)
+                return result
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при получении людей, читавших тему {thread_id}: {e}")
+            return None
+        except Exception as e:
+            print(f"Неожиданная ошибка при получении людей, читавших тему {thread_id}: {e}")
+            return None
+
     # MEMBER
     async def follow_member(self, member_id: int) -> aiohttp.ClientResponse:
         if member_id == self.current_member.id:

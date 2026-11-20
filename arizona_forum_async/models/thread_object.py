@@ -144,3 +144,12 @@ class Thread:
         """
 
         return await self.API.get_thread_category(self.id)
+
+    async def get_readers(self) -> list[dict]:
+        """Получить список пользователей, которые читали тему
+        
+        Returns:
+            Список (list), состоящий из словарей (dict) с информацией о читателях темы
+        """
+
+        return await self.API.get_thread_readers(self.id)
