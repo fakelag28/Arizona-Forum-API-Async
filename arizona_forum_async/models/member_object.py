@@ -82,6 +82,14 @@ class Member:
 
         return await self.API.get_profile_messages(self.id, page)
 
+    async def get_iplog(self) -> list[dict]:
+        """Получить IP адреса пользователя
+
+        Returns:
+            Cписок (list) из словарей (dict) с информацией о IP адресах пользователя
+        """
+
+        return await self.API.get_member_iplog(self.id)
 
 class CurrentMember(Member):
     follow = property(doc='Forbidden method for Current Member object')
