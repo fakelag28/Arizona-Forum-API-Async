@@ -934,6 +934,60 @@ class ArizonaForumAPI:
             print(f"Неожиданная ошибка при получении сообщений профиля {member_id} (страница {page}): {e}")
             return None
 
+    async def get_member_username_history(self, member_id: int) -> Optional[List[Dict]]:
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        token = await self.token
+        url = f"{MAIN_URL}/members/{member_id}/username-history"
+        params = {'_xfResponseType': 'json', '_xfWithData': 1, '_xfRequestUri': f"/members/{member_id}/", '_xfToken': token}
+        try:
+            async with self._session.get(url, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+                if data.get('status') == 'error':
+                    return None
+
+                html_content = unescape(data['html']['content'])
+                soup = BeautifulSoup(html_content, "lxml")
+
+                table = soup.find("table", class_="dataList-table")
+                if table is None: return []
+                rows = table.find_all("tr", class_="dataList-row")
+
+                result = []
+                for row in rows:
+                    if "dataList-row--header" in row.get("class", []):
+                        continue
+
+                    cells = row.find_all("td", class_="dataList-cell")
+                    if len(cells) < 3:
+                        continue
+
+                    row_data = {}
+                    old_cell, new_cell, date_cell = cells[0], cells[1], cells[2]
+
+                    row_data["old_name"] = old_cell.get_text(strip=True)
+                    row_data["new_name"] = new_cell.get_text(strip=True)
+
+                    row_data["reason"] = None
+                    link = new_cell.find("a", attrs={"role": "button"})
+                    if link:
+                        raw = link.get("data-original-title") or link.get("title")
+                        if raw:
+                            row_data["reason"] = re.sub(r"^Причина изменения:\s*", "", raw).strip()
+
+                    time_tag = date_cell.find("time")
+                    row_data["change_date"] = time_tag.get("data-timestamp") if time_tag else None
+
+                    result.append(row_data)
+                return result
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при получении истории смены ников {member_id}: {e}")
+            return None
+        except Exception as e:
+            print(f"Неожиданная ошибка при получении истории смены ников {member_id}: {e}")
+            return None
 
     # POST
     async def react_post(self, post_id: int, reaction_id: int = 1) -> aiohttp.ClientResponse:
