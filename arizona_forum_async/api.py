@@ -749,6 +749,10 @@ class ArizonaForumAPI:
                     thread_data['username_author'] = username_author_tag.get_text(strip=True) if username_author_tag else None
                     thread_data['thread_title'] = link.get_text(" ", strip=True)
 
+                    meta_div = thread.find('div', 'structItem-cell--meta')
+                    post_count = meta_div.find('dl', 'pairs pairs--justified').find('dd') if meta_div else None
+                    thread_data["post_count"] = post_count.text.strip() if post_count else None
+
                     prefix_label = title_div.find('span', class_='label')
                     thread_data['prefix'] = prefix_label.get_text(" ", strip=True) if prefix_label else None
 
