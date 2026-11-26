@@ -82,6 +82,17 @@ class Member:
 
         return await self.API.get_profile_messages(self.id, page)
 
+    async def edit_leaders_subgroup(self, subgroup_ids: int | list[int]) -> aiohttp.ClientResponse:
+        """Выдать/Забрать подгруппу лидера
+
+        Attributes:
+            subgroup_ids (int | list[int]): ID подгруппы (84 - Судья / 85 - Лидер организации / Любая другая - очистить подгруппы)
+        
+        Returns:
+            Объект Response модуля requests
+        """
+
+        return await self.API.edit_leaders_subgroup(self.id, subgroup_ids)
     async def get_iplog(self) -> list[dict]:
         """Получить IP адреса пользователя
 

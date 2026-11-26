@@ -1103,6 +1103,29 @@ class ArizonaForumAPI:
             print(f"Неожиданная ошибка при получении сообщений профиля {member_id} (страница {page}): {e}")
             return None
 
+    async def edit_leaders_subgroup(self, member_id: int, subgroup_ids: int | list[int]) -> aiohttp.ClientResponse:
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        token = await self.token
+        url = f"{MAIN_URL}/curator-leader-subgroups/index"
+        
+        if isinstance(subgroup_ids, int) and not isinstance(subgroup_ids, bool):
+            ids = [subgroup_ids]
+        else:
+            ids = subgroup_ids
+
+        payload = {
+            "_xfToken": token,
+            'user_id': member_id,
+            **{f"leader_subgroups[{subgroup_id}]": 1 for subgroup_id in ids}
+        }
+
+        try:
+            async with self._session.post(url, data=payload) as response:
+                return response
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при изменении группы лидеров пользователя {member_id}: {e}")
+            raise e
     async def get_member_username_history(self, member_id: int) -> Optional[List[Dict]]:
         if not self._session or self._session.closed:
             raise Exception("Сессия не активна. Вызовите connect() сначала.")
