@@ -94,7 +94,7 @@ class Thread:
 
         return await self.API.edit_thread(self.id, message_html)
 
-    async def edit_info(self, title: str = None, prefix_id: int = None, sticky: bool = True, opened: bool = True) -> aiohttp.ClientResponse:
+    async def edit_info(self, title: str = None, prefix_id: int = None, sticky: bool = True, opened: bool = True, index_state: str = "default") -> aiohttp.ClientResponse:
         """Изменить заголовок и/или префикс темы
 
         Attributes:
@@ -102,12 +102,13 @@ class Thread:
             prefix_id (int): Новый ID префикса
             sticky (bool): Закрепить (True - закреп / False - не закреп)
             opened (bool): Открыть/закрыть тему (True - открыть / False - закрыть)
+            index_state (str): Индексировать поисковыми системами (default - по умолчанию (да) / indexed - да / not_indexed - нет)
         
         Returns:
             Объект Response модуля requests
         """
 
-        return await self.API.edit_thread_info(self.id, title, prefix_id, sticky, opened)
+        return await self.API.edit_thread_info(self.id, title, prefix_id, sticky, opened, index_state)
     
 
     async def get_posts(self, page: int = 1) -> list:
@@ -144,3 +145,12 @@ class Thread:
         """
 
         return await self.API.get_thread_category(self.id)
+
+    async def get_readers(self) -> list[dict]:
+        """Получить список пользователей, которые читали тему
+        
+        Returns:
+            Список (list), состоящий из словарей (dict) с информацией о читателях темы
+        """
+
+        return await self.API.get_thread_readers(self.id)

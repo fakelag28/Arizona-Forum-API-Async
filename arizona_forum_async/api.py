@@ -1,3 +1,4 @@
+import ipaddress
 import aiohttp
 from bs4 import BeautifulSoup
 from re import compile, findall
@@ -748,6 +749,10 @@ class ArizonaForumAPI:
                     thread_data['username_author'] = username_author_tag.get_text(strip=True) if username_author_tag else None
                     thread_data['thread_title'] = link.get_text(" ", strip=True)
 
+                    meta_div = thread.find('div', 'structItem-cell--meta')
+                    post_count = meta_div.find('dl', 'pairs pairs--justified').find('dd') if meta_div else None
+                    thread_data["post_count"] = post_count.text.strip() if post_count else None
+
                     prefix_label = title_div.find('span', class_='label')
                     thread_data['prefix'] = prefix_label.get_text(" ", strip=True) if prefix_label else None
 
@@ -860,7 +865,171 @@ class ArizonaForumAPI:
             print(f"Неожиданная ошибка при получении дочерних категорий из {category_id}: {e}")
             return None
 
+    async def get_thread_readers(self, thread_id: int) -> Optional[List[Dict]]:
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        token = await self.token
+        url = f"{MAIN_URL}/threads/{thread_id}/show-readers"
+        params = {'_xfResponseType': 'json', '_xfRequestUri': f"/threads/{thread_id}/", '_xfToken': token}
+        try:
+            async with self._session.get(url, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+                if data.get('status') == 'error':
+                    return None
+
+                html_content = unescape(data['html']['content'])
+                soup = BeautifulSoup(html_content, "lxml")
+
+                readers_tag = soup.find("ul", class_="listInline listInline--comma")
+                if readers_tag is None: return []
+
+                result = []
+                for reader in readers_tag.find_all("a", class_="username"):
+                    reader_data = {}
+
+                    reader_data["username"] = reader.get_text(strip=True)
+                    reader_data["id"] = reader.get("data-user-id")
+                    reader_data["title"] = reader.get("title")
+                    
+                    result.append(reader_data)
+                return result
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при получении людей, читавших тему {thread_id}: {e}")
+            return None
+        except Exception as e:
+            print(f"Неожиданная ошибка при получении людей, читавших тему {thread_id}: {e}")
+            return None
+
     # MEMBER
+    async def get_member_iplog(self, member_id: int) -> Optional[List[Dict]]:
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        token = await self.token
+        url = f"{MAIN_URL}/members/{member_id}/user-ips"
+        params = {'_xfResponseType': 'json', '_xfWithData': 1, '_xfRequestUri': f"/members/{member_id}/", '_xfToken': token}
+        try:
+            async with self._session.get(url, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+                if data.get('status') == 'error':
+                    return None
+
+                html_content = unescape(data['html']['content'])
+                soup = BeautifulSoup(html_content, "lxml")
+
+                table = soup.find("table", class_="dataList-table")
+                if table is None: return []
+                rows = table.find_all("tr", class_="dataList-row")
+
+                result = []
+                for row in rows:
+                    if "dataList-row--header" in row.get("class", []):
+                        continue
+
+                    cells = row.find_all("td", class_="dataList-cell")
+                    if len(cells) < 5:
+                        continue
+
+                    row_data = {}
+                    ip, total_auth, oldest_time, latest_time = cells[0], cells[1], cells[2], cells[3]
+
+                    row_data["ip"] = ip.get_text(strip=True)
+                    row_data["total_auth"] = total_auth.get_text(strip=True)
+
+                    oldest_time_tag = oldest_time.find("time", class_="u-dt")
+                    row_data["oldest_auth_time"] = 0
+                    if oldest_time_tag and oldest_time_tag.has_attr('data-timestamp'):
+                        data_timestamp_value = oldest_time_tag['data-timestamp']
+                        if data_timestamp_value.isdigit():
+                            row_data["latest_auth_time"] = int(data_timestamp_value)
+
+                    latest_time_tag = latest_time.find("time", class_="u-dt")
+                    row_data["latest_auth_time"] = 0
+                    if latest_time_tag and latest_time_tag.has_attr('data-timestamp'):
+                        data_timestamp_value = latest_time_tag['data-timestamp']
+                        if data_timestamp_value.isdigit():
+                            row_data["latest_auth_time"] = int(data_timestamp_value)
+
+                    result.append(row_data)
+                return result
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при получении IP адресов пользователя {member_id}: {e}")
+            return None
+        except Exception as e:
+            print(f"Неожиданная ошибка при получении IP адресов пользователя {member_id}: {e}")
+            return None
+
+    async def get_members_by_ip(self, ip_address: str) -> Optional[List[Dict]]:
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+
+        try:
+            ipaddress.ip_address(ip_address)
+        except ValueError:
+            print(f"Передан невалидный IP-адрес: {ip_address}")
+            return None
+        
+        token = await self.token
+        url = f"{MAIN_URL}/members/ip-users"
+        params = {'ip': ip_address, '_xfResponseType': 'json', '_xfWithData': 1, '_xfToken': token}
+        try:
+            async with self._session.get(url, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+                if data.get('status') == 'error':
+                    return None
+
+                html_content = unescape(data['html']['content'])
+                soup = BeautifulSoup(html_content, "lxml")
+
+                table = soup.find("table", class_="dataList-table")
+                if table is None: return []
+                rows = table.find_all("tr", class_="dataList-row")
+
+                result = []
+                for row in rows:
+                    username_el = row.find("span", class_="username")
+                    if not username_el:
+                        continue
+
+                    row_data = {}
+                    row_data["username"] = username_el.get_text(strip=True)
+                    user_id_raw = username_el.get("data-user-id")
+                    row_data["id"] = int(user_id_raw) if user_id_raw else None
+
+                    sub_row = row.find("div", class_="dataList-subRow")
+                    lis = sub_row.find_all("li") if sub_row else []
+
+                    row_data["ip"] = lis[0].get_text(strip=True) if len(lis) > 0 else None
+
+                    count_raw = lis[1].get_text(strip=True) if len(lis) > 1 else None
+                    row_data["count"] = None
+                    if count_raw:
+                        m = re.search(r"\d+", count_raw)
+                        if m:
+                            row_data["count"] = int(m.group())
+
+                    time_tag = row.find("time", class_="u-dt")
+
+                    row_data["last_auth"] = 0
+                    if time_tag and time_tag.has_attr('data-timestamp'):
+                        data_timestamp_value = time_tag['data-timestamp']
+                        if data_timestamp_value.isdigit():
+                            row_data["last_auth"] = int(data_timestamp_value)
+
+                    result.append(row_data)
+                return result
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при получении пользователей с IP-адресом {ip_address}: {e}")
+            return None
+        except Exception as e:
+            print(f"Неожиданная ошибка при получении пользователей с IP-адресом {ip_address}: {e}")
+            return None
+
     async def follow_member(self, member_id: int) -> aiohttp.ClientResponse:
         if member_id == self.current_member.id:
             raise ThisIsYouError(member_id)
@@ -957,6 +1126,60 @@ class ArizonaForumAPI:
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при изменении группы лидеров пользователя {member_id}: {e}")
             raise e
+    async def get_member_username_history(self, member_id: int) -> Optional[List[Dict]]:
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        token = await self.token
+        url = f"{MAIN_URL}/members/{member_id}/username-history"
+        params = {'_xfResponseType': 'json', '_xfWithData': 1, '_xfRequestUri': f"/members/{member_id}/", '_xfToken': token}
+        try:
+            async with self._session.get(url, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+                if data.get('status') == 'error':
+                    return None
+
+                html_content = unescape(data['html']['content'])
+                soup = BeautifulSoup(html_content, "lxml")
+
+                table = soup.find("table", class_="dataList-table")
+                if table is None: return []
+                rows = table.find_all("tr", class_="dataList-row")
+
+                result = []
+                for row in rows:
+                    if "dataList-row--header" in row.get("class", []):
+                        continue
+
+                    cells = row.find_all("td", class_="dataList-cell")
+                    if len(cells) < 3:
+                        continue
+
+                    row_data = {}
+                    old_cell, new_cell, date_cell = cells[0], cells[1], cells[2]
+
+                    row_data["old_name"] = old_cell.get_text(strip=True)
+                    row_data["new_name"] = new_cell.get_text(strip=True)
+
+                    row_data["reason"] = None
+                    link = new_cell.find("a", attrs={"role": "button"})
+                    if link:
+                        raw = link.get("data-original-title") or link.get("title")
+                        if raw:
+                            row_data["reason"] = re.sub(r"^Причина изменения:\s*", "", raw).strip()
+
+                    time_tag = date_cell.find("time")
+                    row_data["change_date"] = time_tag.get("data-timestamp") if time_tag else None
+
+                    result.append(row_data)
+                return result
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при получении истории смены ников {member_id}: {e}")
+            return None
+        except Exception as e:
+            print(f"Неожиданная ошибка при получении истории смены ников {member_id}: {e}")
+            return None
 
     # POST
     async def react_post(self, post_id: int, reaction_id: int = 1) -> aiohttp.ClientResponse:
@@ -1213,14 +1436,15 @@ class ArizonaForumAPI:
             print(f"Ошибка сети при редактировании темы {thread_id} (пост {thread_post_id}): {e}")
             raise e
 
-    async def edit_thread_info(self, thread_id: int, title: str, prefix_id: Optional[int] = None, sticky: bool = True, opened: bool = True) -> aiohttp.ClientResponse:
+    async def edit_thread_info(self, thread_id: int, title: str, prefix_id: Optional[int] = None, sticky: bool = True, opened: bool = True, index_state: str = "default") -> aiohttp.ClientResponse:
         if not self._session or self._session.closed:
             raise Exception("Сессия не активна. Вызовите connect() сначала.")
         token = await self.token
         url = f"{MAIN_URL}/threads/{thread_id}/edit"
         payload = {
             "_xfToken": token,
-            'title': title
+            'title': title,
+            "index_state": index_state
         }
 
         if prefix_id is not None:
