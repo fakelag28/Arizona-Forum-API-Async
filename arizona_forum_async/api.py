@@ -1,3 +1,4 @@
+import ipaddress
 import aiohttp
 from bs4 import BeautifulSoup
 from re import compile, findall
@@ -898,6 +899,133 @@ class ArizonaForumAPI:
             return None
 
     # MEMBER
+    async def get_member_iplog(self, member_id: int) -> Optional[List[Dict]]:
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+        token = await self.token
+        url = f"{MAIN_URL}/members/{member_id}/user-ips"
+        params = {'_xfResponseType': 'json', '_xfWithData': 1, '_xfRequestUri': f"/members/{member_id}/", '_xfToken': token}
+        try:
+            async with self._session.get(url, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+                if data.get('status') == 'error':
+                    return None
+
+                html_content = unescape(data['html']['content'])
+                soup = BeautifulSoup(html_content, "lxml")
+
+                table = soup.find("table", class_="dataList-table")
+                if table is None: return []
+                rows = table.find_all("tr", class_="dataList-row")
+
+                result = []
+                for row in rows:
+                    if "dataList-row--header" in row.get("class", []):
+                        continue
+
+                    cells = row.find_all("td", class_="dataList-cell")
+                    if len(cells) < 5:
+                        continue
+
+                    row_data = {}
+                    ip, total_auth, oldest_time, latest_time = cells[0], cells[1], cells[2], cells[3]
+
+                    row_data["ip"] = ip.get_text(strip=True)
+                    row_data["total_auth"] = total_auth.get_text(strip=True)
+
+                    oldest_time_tag = oldest_time.find("time", class_="u-dt")
+                    row_data["oldest_auth_time"] = 0
+                    if oldest_time_tag and oldest_time_tag.has_attr('data-timestamp'):
+                        data_timestamp_value = oldest_time_tag['data-timestamp']
+                        if data_timestamp_value.isdigit():
+                            row_data["latest_auth_time"] = int(data_timestamp_value)
+
+                    latest_time_tag = latest_time.find("time", class_="u-dt")
+                    row_data["latest_auth_time"] = 0
+                    if latest_time_tag and latest_time_tag.has_attr('data-timestamp'):
+                        data_timestamp_value = latest_time_tag['data-timestamp']
+                        if data_timestamp_value.isdigit():
+                            row_data["latest_auth_time"] = int(data_timestamp_value)
+
+                    result.append(row_data)
+                return result
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при получении IP адресов пользователя {member_id}: {e}")
+            return None
+        except Exception as e:
+            print(f"Неожиданная ошибка при получении IP адресов пользователя {member_id}: {e}")
+            return None
+
+    async def get_members_by_ip(self, ip_address: str) -> Optional[List[Dict]]:
+        if not self._session or self._session.closed:
+            raise Exception("Сессия не активна. Вызовите connect() сначала.")
+
+        try:
+            ipaddress.ip_address(ip_address)
+        except ValueError:
+            print(f"Передан невалидный IP-адрес: {ip_address}")
+            return None
+        
+        token = await self.token
+        url = f"{MAIN_URL}/members/ip-users"
+        params = {'ip': ip_address, '_xfResponseType': 'json', '_xfWithData': 1, '_xfToken': token}
+        try:
+            async with self._session.get(url, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+                if data.get('status') == 'error':
+                    return None
+
+                html_content = unescape(data['html']['content'])
+                soup = BeautifulSoup(html_content, "lxml")
+
+                table = soup.find("table", class_="dataList-table")
+                if table is None: return []
+                rows = table.find_all("tr", class_="dataList-row")
+
+                result = []
+                for row in rows:
+                    username_el = row.find("span", class_="username")
+                    if not username_el:
+                        continue
+
+                    row_data = {}
+                    row_data["username"] = username_el.get_text(strip=True)
+                    user_id_raw = username_el.get("data-user-id")
+                    row_data["id"] = int(user_id_raw) if user_id_raw else None
+
+                    sub_row = row.find("div", class_="dataList-subRow")
+                    lis = sub_row.find_all("li") if sub_row else []
+
+                    row_data["ip"] = lis[0].get_text(strip=True) if len(lis) > 0 else None
+
+                    count_raw = lis[1].get_text(strip=True) if len(lis) > 1 else None
+                    row_data["count"] = None
+                    if count_raw:
+                        m = re.search(r"\d+", count_raw)
+                        if m:
+                            row_data["count"] = int(m.group())
+
+                    time_tag = row.find("time", class_="u-dt")
+
+                    row_data["last_auth"] = 0
+                    if time_tag and time_tag.has_attr('data-timestamp'):
+                        data_timestamp_value = time_tag['data-timestamp']
+                        if data_timestamp_value.isdigit():
+                            row_data["last_auth"] = int(data_timestamp_value)
+
+                    result.append(row_data)
+                return result
+        except aiohttp.ClientError as e:
+            print(f"Ошибка сети при получении пользователей с IP-адресом {ip_address}: {e}")
+            return None
+        except Exception as e:
+            print(f"Неожиданная ошибка при получении пользователей с IP-адресом {ip_address}: {e}")
+            return None
+
     async def follow_member(self, member_id: int) -> aiohttp.ClientResponse:
         if member_id == self.current_member.id:
             raise ThisIsYouError(member_id)
