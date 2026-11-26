@@ -1413,14 +1413,15 @@ class ArizonaForumAPI:
             print(f"Ошибка сети при редактировании темы {thread_id} (пост {thread_post_id}): {e}")
             raise e
 
-    async def edit_thread_info(self, thread_id: int, title: str, prefix_id: Optional[int] = None, sticky: bool = True, opened: bool = True) -> aiohttp.ClientResponse:
+    async def edit_thread_info(self, thread_id: int, title: str, prefix_id: Optional[int] = None, sticky: bool = True, opened: bool = True, index_state: str = "default") -> aiohttp.ClientResponse:
         if not self._session or self._session.closed:
             raise Exception("Сессия не активна. Вызовите connect() сначала.")
         token = await self.token
         url = f"{MAIN_URL}/threads/{thread_id}/edit"
         payload = {
             "_xfToken": token,
-            'title': title
+            'title': title,
+            "index_state": index_state
         }
 
         if prefix_id is not None:
