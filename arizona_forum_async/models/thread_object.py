@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 
 class Thread:
-    def __init__(self, API: 'ArizonaAPI', id: int, creator: 'Member', create_date: int, title: str, prefix: str, text_content: str, html_content: str, pages_content: int, thread_post_id: int, is_closed: bool) -> None:
+    def __init__(self, API: 'ArizonaAPI', id: int, creator: 'Member', create_date: int, title: str, prefix: str, text_content: str, html_content: str, pages_content: int, thread_post_id: int, is_closed: bool, post_count: int, last_post_id: int, last_post_author: str, last_post_author_id: int) -> None:
         self.API = API
         self.id = id
         """**ID темы**"""
@@ -27,6 +27,14 @@ class Thread:
         """**Сырой контент темы**"""
         self.pages_count = pages_content
         """**Количество страниц с ответами в теме**"""
+        self.post_count = post_count
+        """**Количество ответов в теме без учёта сообщения темы**"""
+        self.last_post_id = last_post_id
+        """**ID последнего ответа**"""
+        self.last_post_author = last_post_author
+        """**Имя автора последнего ответа**"""
+        self.last_post_author_id = last_post_author_id
+        """**ID автора последнего ответа**"""
         self.is_closed = is_closed
         """**Закрыта ли тема**"""
         self.thread_post_id = thread_post_id
