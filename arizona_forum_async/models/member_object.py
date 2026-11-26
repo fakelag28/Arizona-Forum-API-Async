@@ -90,7 +90,16 @@ class Member:
         """
 
         return await self.API.get_member_iplog(self.id)
+    async def get_username_history(self) -> list[dict]:
+        """Получить историю смены ников пользователя
+            
+        Returns:
+            Список (list), состоящий из словарей (dict) с информацией о смене ников
+        """
 
+        return await self.API.get_member_username_history(self.id)
+
+    
 class CurrentMember(Member):
     follow = property(doc='Forbidden method for Current Member object')
     ignore = property(doc='Forbidden method for Current Member object')
