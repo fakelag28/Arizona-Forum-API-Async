@@ -7,7 +7,7 @@ from typing import List, Dict, Optional, Union, Tuple, Iterable
 from collections import defaultdict
 import datetime
 
-from arizona_forum_async.consts import MAIN_URL, ROLE_COLOR, DEFAULT_USER_AGENT
+from arizona_forum_async.consts import MAIN_URL, MAX_POSTS_PER_PAGE, ROLE_COLOR, DEFAULT_USER_AGENT
 from arizona_forum_async.bypass_antibot import bypass_async, build_session
 from arizona_forum_async._update_check import check_for_updates_async
 
@@ -398,12 +398,50 @@ class ArizonaForumAPI:
                 except (IndexError, AttributeError, ValueError):
                     pages_count = 1
 
+                messages_tag = content_soup.find_all('article', {'class': 'message'})
+
+                last_post_author = None
+                last_post_author_id = 0
+                last_post_id = 0
+                post_count = 0
+                
+                if messages_tag:
+                    if pages_count > 1:                        
+                        last_page_url = f"{MAIN_URL}/threads/{thread_id}/page-{pages_count}"
+
+                        async with self._session.get(last_page_url, params=params) as response:
+                            response.raise_for_status()
+                            last_data = await response.json()
+
+                        last_html = unescape(last_data['html']['content'])
+                        last_soup = BeautifulSoup(last_html, 'lxml')
+                        
+                        messages_tag = last_soup.find_all('article', {'class': 'message'})
+
+                        if messages_tag:
+                            post_count = (pages_count - 1) * MAX_POSTS_PER_PAGE + len(messages_tag) - 1
+                            last_message = messages_tag[-1]
+                            last_post_id = int(last_message['data-content'].split('-')[-1])                        
+                            last_post_author = last_message['data-author']
+
+                            author_link = last_message.select_one('h4.message-name a.username[data-user-id]')
+                            last_post_author_id = int(author_link['data-user-id']) if author_link else None
+
+                    else:
+                        post_count = len(messages_tag) - 1
+                        last_message = messages_tag[-1]
+                        last_post_id = int(last_message['data-content'].split('-')[-1])
+                        last_post_author = last_message['data-author']
+
+                        author_link = last_message.select_one('h4.message-name a.username[data-user-id]')
+                        last_post_author_id = int(author_link['data-user-id']) if author_link else None
+                        
                 is_closed = bool(content_soup.find('dl', {'class': 'blockStatus'}))
 
                 post_article_tag = content_soup.find('article', {'id': compile(r'js-post-\d+')})
                 thread_post_id = int(post_article_tag['id'].strip('js-post-')) if post_article_tag and post_article_tag.has_attr('id') else 0
 
-                return Thread(self, thread_id, creator, create_date, title, prefix, thread_content, thread_html_content, pages_count, thread_post_id, is_closed)
+                return Thread(self, thread_id, creator, create_date, title, prefix, thread_content, thread_html_content, pages_count, thread_post_id, is_closed, post_count, last_post_id, last_post_author, last_post_author_id)
 
         except aiohttp.ClientError as e:
             print(f"Ошибка сети при получении темы {thread_id}: {e}")

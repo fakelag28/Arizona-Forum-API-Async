@@ -2,7 +2,7 @@ MAIN_URL = "https://forum.arizona-rp.com"
 
 SOCKS_SCHEMES = ("socks4", "socks4a", "socks5", "socks5h")
 SUPPORTED_PROXY_SCHEMES = ("http", "https") + SOCKS_SCHEMES
-
+MAX_POSTS_PER_PAGE = 20
 REACTIONS = {
     1: 'Мне нравится',
     2: 'Любовь',
